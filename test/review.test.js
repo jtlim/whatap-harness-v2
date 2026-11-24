@@ -82,7 +82,7 @@ test('explicit approval produces numeric evidence with stable aliases and strips
     probes: [probe([row('private-key', '53.13')], [row('private-key', 53.129)])] } }));
   const attachments = [{ label: 'comparison' }];
   const result = buildReview(manifest, runs, attachments, policy);
-  const aliases = result.body.match(/행-[0-9a-f]+/g);
+  const aliases = result.body.match(/Series-[0-9]+/g);
   assert.equal(aliases.length, 2);
   assert.equal(aliases[0], aliases[1]);
   assert.match(result.body, /53\.129/);
@@ -125,7 +125,7 @@ test('project/field policy selects five approved samples in a new scenario, with
   const policy = {authorization:'approved',projectCodes:[701],fields:['memory_pused'],
     includeDifferences:true,includeStatistics:true};
   const {body} = buildReview(manifest, runs, attachments, policy);
-  const lines = body.split('\n').filter(line => line.startsWith('| 비공개 |'));
+  const lines = body.split('\n').filter(line => line.includes('| Series-'));
   assert.equal(lines.length, 5);
   assert.match(lines[0], /HTTP에만 존재/);
   assert.match(lines[1], /불일치/);
@@ -134,4 +134,23 @@ test('project/field policy selects five approved samples in a new scenario, with
     /공개 승인된 비교 통계/);
   p.evidence.reference.request.projectCode = 702;
   assert.doesNotMatch(buildReview(manifest, runs, attachments, policy).body, /33\.25/);
+});
+
+test('approved report shows a relative offset, the same server alias in different buckets, and a safe MCP error', () => {
+  const manifest = { kind: 'audit', baselineCommit: before, candidateCommit: after, harnessCommit: harness,
+    publicReviewed: true, sections: Object.fromEntries(Object.keys(sections).map(k => [k, '검토 문장'])) };
+  const rows = [row('hostname.internal', 12.345), { ...row('hostname.internal', 56.789), time: window.stime + 5000 }];
+  const p = probe(null, rows);
+  p.reason = 'ABSOLUTE_RANGE_REJECTED';
+  p.status = 'FAIL';
+  p.evidence.mcpIsError = true;
+  p.evidence.mcpText = 'Invalid time range format: private-project hostname.internal';
+  const run = { id: 'baseline', status: 'VALIDATION_FAILED', finishedAt: '2025-01-02', events: [],
+    conditions: { cases: [{ ...scenario, domain: 'server' }] }, probes: [p] };
+  const result = buildReview(manifest, [{ role: 'before', run }], [{ label: 'test' }],
+    { authorization: 'approved', projectCodes: [701], fields: ['cpu'], includeStatistics: true });
+  assert.match(result.body, /\| 0 \| Server-01 \| cpu \| — \| 12\.345 \|/);
+  assert.match(result.body, /\| 5000 \| Server-01 \| cpu \| — \| 56\.789 \|/);
+  assert.match(result.body, /MCP 오류 · Invalid time range format \/ 독립 HTTP 200/);
+  assert.doesNotMatch(result.body, /private-project|hostname\.internal|2025-01-01/);
 });
