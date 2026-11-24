@@ -72,3 +72,35 @@ test('review rejects different fixed control windows and requires a Harness comp
   assert.throws(() => buildReview({ ...manifest, kind: 'harness' }, [], attachments),
     /SAME_INPUT_COMPARISON_ATTACHMENT_REQUIRED/);
 });
+
+test('explicit approval produces numeric evidence with stable aliases and strips the original identity and time', () => {
+  const manifest = { kind: 'audit', baselineCommit: before, candidateCommit: after, harnessCommit: harness,
+    publicReviewed: true, sections: Object.fromEntries(Object.keys(sections).map(k => [k, '검토 문장'])),
+    publishSamples: ['before', 'after'].map(runId => ({ runId, probeIndex: 0, fields: ['cpu'], authorization: 'approval-1' })) };
+  const runs = ['before', 'after'].map(role => ({ role, run: { id: role, status: 'VERIFIED',
+    finishedAt: '2025-01-02', events: [], conditions: { cases: [scenario] },
+    probes: [probe([row('private-key', '53.13')], [row('private-key', 53.129)])] } }));
+  const attachments = [{ label: 'comparison' }];
+  const result = buildReview(manifest, runs, attachments);
+  const aliases = result.body.match(/행-[0-9a-f]+/g);
+  assert.equal(aliases.length, 2);
+  assert.equal(aliases[0], aliases[1]);
+  assert.match(result.body, /53\.129/);
+  assert.doesNotMatch(result.body, /private-key|2025-01-01|approval-1/);
+  assert.match(result.local, /private-key/);
+  assert.match(result.local, /2025-01-01/);
+  assert.throws(() => buildReview({ ...manifest, publishSamples: [{ ...manifest.publishSamples[0], authorization: '' }] },
+    runs, attachments), /INVALID_SAMPLE_APPROVAL/);
+  assert.throws(() => buildReview({ ...manifest, publishSamples: [{ ...manifest.publishSamples[0], fields: ['_id_'] }] },
+    runs, attachments), /INVALID_SAMPLE_APPROVAL/);
+});
+
+test('rejected MCP cases show up to five real HTTP reference cells and leave MCP empty', () => {
+  const p = probe(null, Array.from({ length: 7 }, (_, i) => row('reference-' + i, 10 + i)));
+  p.reason = 'ABSOLUTE_RANGE_REJECTED';
+  p.evidence.mcpIsError = true;
+  const { samples } = comparisonEvidence(p, scenario);
+  assert.equal(samples.length, 5);
+  assert.deepEqual(samples[0], { time: window.stime, key: JSON.stringify([String(window.stime), 'reference-0']),
+    field: 'cpu', http: 10, status: 'HTTP_REFERENCE_ONLY' });
+});

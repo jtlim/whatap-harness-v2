@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { buildReview } from './lib/review.js';
 
 process.umask(0o077);
@@ -13,17 +13,19 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const root = dirname(resolve(manifestPath));
   const digest = data => createHash('sha256').update(data).digest('hex');
+  const localHref = path => relative(resolve(directory), resolve(root, path))
+    .split('/').map(encodeURIComponent).join('/');
   const runs = [];
   const attachments = [];
   for (const entry of manifest.runs ?? []) {
     const data = await readFile(resolve(root, entry.path));
     runs.push({ role: entry.role, run: JSON.parse(data) });
-    attachments.push({ label: entry.role, path: entry.path, sha256: digest(data) });
+    attachments.push({ label: entry.role, path: entry.path, localHref: localHref(entry.path), sha256: digest(data) });
   }
   for (const entry of manifest.attachments ?? []) {
     const data = await readFile(resolve(root, entry.path));
     if (!entry.label || !data.length) throw Error('REVIEW_ATTACHMENT_EMPTY');
-    attachments.push({ label: entry.label, role: entry.role, path: entry.path, sha256: digest(data) });
+    attachments.push({ label: entry.label, role: entry.role, path: entry.path, localHref: localHref(entry.path), sha256: digest(data) });
   }
   if (!attachments.some(a => a.role === 'test' || a.role === 'reproduction'))
     throw Error('REVIEW_TEST_OR_REPRODUCTION_ATTACHMENT_REQUIRED');
