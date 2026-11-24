@@ -36,5 +36,20 @@
     "limits": "",
     "instructions": "",
     "evidence": ""
-  }
+  },
+  "mergeRationale": [
+    {
+      "title": "",
+      "classification": "",
+      "scope": "",
+      "unchanged": "",
+      "userImpact": "",
+      "alternatives": "",
+      "choice": "",
+      "benefit": "",
+      "compatibility": "",
+      "mergeBasis": ""
+    }
+  ],
+  "testDetails": ""
 }

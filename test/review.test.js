@@ -2,8 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { comparisonEvidence } from '../lib/comparison-evidence.js';
 import { buildReview, sections } from '../lib/review.js';
+import { rationaleFields } from '../lib/merge-rationale.js';
+import { formatMeasurement } from '../lib/review-tables.js';
 
 const before = 'a'.repeat(40), after = 'b'.repeat(40), harness = 'c'.repeat(40);
+const rationale = [{ ...Object.fromEntries(Object.keys(rationaleFields).map(k => [k, '근거'])),
+  title: '기술 변경', classification: '기능 개선', scope: 'MCP 동작 품질' }];
 const window = { stime: 1735689600000, etime: 1735689900000 };
 const scenario = { id: 'server-relative', projectCode: 701, matchKeys: ['time', '_id_'], compareFields: ['cpu'] };
 const row = (id, cpu) => ({ time: window.stime, _id_: id, cpu });
@@ -39,7 +43,7 @@ test('a rejected query reports the HTTP control and never invents candidate rows
 });
 
 test('review gates sections, disclosure and live evidence and keeps actual rows local', () => {
-  const manifest = { kind: 'mcp', baselineCommit: before, candidateCommit: after, harnessCommit: harness,
+  const manifest = { kind: 'mcp', mergeRationale: rationale, baselineCommit: before, candidateCommit: after, harnessCommit: harness,
     publicReviewed: true, sections: Object.fromEntries(Object.keys(sections).map(k => [k, '검토 문장'])) };
   const makeRun = (role, commit) => ({ role, run: { id: role, mode: 'live', status: 'VERIFIED', harness,
     finishedAt: '2025-01-01', target: { commit, dirty: false }, events: [], conditions: { cases: [scenario] },
@@ -48,6 +52,9 @@ test('review gates sections, disclosure and live evidence and keeps actual rows 
   const attachments = [{ label: 'test', path: 'local-run.log', sha256: 'd'.repeat(64) }];
   const report = buildReview(manifest, runs, attachments);
   assert.match(report.local, /private-id/);
+  assert.throws(() => buildReview({ ...manifest, mergeRationale: [] }, runs, attachments), /MERGE_RATIONALE_REQUIRED/);
+  assert.throws(() => buildReview({ ...manifest,
+    mergeRationale: [{ ...rationale[0], compatibility: '' }] }, runs, attachments), /MERGE_RATIONALE_FIELD_REQUIRED compatibility/);
   assert.doesNotMatch(report.body, /private-id|13\.37|local-run\.log|private response/);
   assert.throws(() => buildReview({ ...manifest, publicReviewed: false }, runs, attachments), /DISCLOSURE/);
   assert.throws(() => buildReview({ ...manifest, sections: {} }, runs, attachments), /SECTION_MISSING/);
@@ -69,7 +76,7 @@ test('review rejects different fixed control windows and requires a Harness comp
   const attachments = [{ role: 'test', label: 'test', path: 'local.log', sha256: 'd'.repeat(64) }];
   assert.throws(() => buildReview(manifest, [makeRun('before', '01'), makeRun('after', '02')], attachments),
     /FIXED_REVIEW_WINDOW_MISMATCH/);
-  assert.throws(() => buildReview({ ...manifest, kind: 'harness' }, [], attachments),
+  assert.throws(() => buildReview({ ...manifest, kind: 'harness', mergeRationale: rationale }, [], attachments),
     /SAME_INPUT_COMPARISON_ATTACHMENT_REQUIRED/);
 });
 
@@ -82,6 +89,9 @@ test('explicit approval produces numeric evidence with stable aliases and strips
     probes: [probe([row('private-key', '53.13')], [row('private-key', 53.129)])] } }));
   const attachments = [{ label: 'comparison' }];
   const result = buildReview(manifest, runs, attachments, policy);
+  const block = result.body.match(/<details>\n<summary>server-relative[^<]+<\/summary>\n\n[\s\S]*?<\/details>/)?.[0];
+  assert.ok(block?.includes('**수정 전**') && block.includes('**수정 후**'));
+  assert.equal(block.match(/조회 시작 기준 위치/g).length, 2);
   const aliases = result.body.match(/Series-[0-9]+/g);
   assert.equal(aliases.length, 2);
   assert.equal(aliases[0], aliases[1]);
@@ -153,4 +163,14 @@ test('approved report shows a relative offset, the same server alias in differen
   assert.match(result.body, /\| 5000 \| Server-01 \| cpu \| — \| 56\.789 \|/);
   assert.match(result.body, /MCP 오류 · Invalid time range format \/ 독립 HTTP 200/);
   assert.doesNotMatch(result.body, /private-project|hostname\.internal|2025-01-01/);
+});
+
+test('report-only number formatting keeps errors nonzero and exact counts intact', () => {
+  assert.equal(formatMeasurement(0, true), '0');
+  assert.equal(formatMeasurement(0.30000000000000004, true), '0.3');
+  assert.equal(formatMeasurement(0.000000000000000003, true), '3e-18');
+  assert.equal(formatMeasurement(-0.000000000000000003, true), '-3e-18');
+  assert.equal(formatMeasurement(9007199254740991), '9007199254740991');
+  assert.equal(formatMeasurement('24.123456789'), '24.123457');
+  assert.equal(formatMeasurement(undefined, true), undefined);
 });
