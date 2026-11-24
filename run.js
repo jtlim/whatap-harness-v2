@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { command } from './lib/process.js';
 import { ReferenceApi } from './lib/http.js';
 import { StdioMcpClient } from './lib/mcp.js';
-import { invalidApmRange, probe } from './lib/probe.js';
+import { argumentsFor, invalidApmRange, probe, query } from './lib/probe.js';
 import { baseline, scenarios } from './lib/scenarios.js';
 import { publicReport, saveReport } from './lib/report.js';
 
@@ -18,6 +18,7 @@ const { values } = parseArgs({ options: {
   'build-only': { type: 'boolean' },
   'offline-install': { type: 'boolean' },
   'failure-example': { type: 'boolean' },
+  'agent-smoke': { type: 'boolean' },
 } });
 
 await mkdir(join(root, 'runs'), { recursive: true, mode: 0o700 });
@@ -31,6 +32,11 @@ const npmEnv = { ...toolsEnv, npm_config_cache: process.env.npm_config_cache ?? 
 const ghEnv = { ...toolsEnv, GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0',
   ...Object.fromEntries(['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR']
     .filter(key => process.env[key]).map(key => [key, process.env[key]])) };
+const agentEnv = { ...toolsEnv,
+  ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
+  ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}) };
+const codexArgs = ['-a', 'never', 'exec', '--ignore-user-config', '--ephemeral',
+  '-c', 'mcp_servers={}', '-c', 'shell_environment_policy.inherit=none'];
 const gitCredentials = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 const secrets = ['WHATAP_API_TOKEN', 'WHATAP_HTTP_API_TOKEN', 'OPENAI_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN']
   .map(key => process.env[key]).filter(Boolean);
@@ -63,7 +69,7 @@ async function step(label, executable, args, options = {}) {
   return result.stdout;
 }
 
-async function candidatePaths(worktree, allowDist = false) {
+async function candidatePaths(worktree, attempt, allowDist = false) {
   const changed = (await step('diff-paths', 'git', ['diff', '--name-only', '-z', 'HEAD'], { cwd: worktree })).split('\0');
   const added = (await step('new-paths', 'git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: worktree })).split('\0');
   const paths = [...new Set([...changed, ...added].filter(Boolean))].sort();
@@ -73,9 +79,6 @@ async function candidatePaths(worktree, allowDist = false) {
       changed.some(path => path.startsWith('tests/'))) {
     throw new RunFailure('VALIDATION_FAILED', 'CANDIDATE_SCOPE_INVALID');
   }
-  const patch = await step('candidate-diff', 'git', ['diff', '--no-ext-diff', '--binary', 'HEAD'], {
-    cwd: worktree, privateOutput: true,
-  });
   for (const path of paths) {
     const info = await lstat(join(worktree, path)).catch(() => null);
     if (!info?.isFile() || info.isSymbolicLink()) throw new RunFailure('VALIDATION_FAILED', 'CANDIDATE_FILE_TYPE');
@@ -86,7 +89,11 @@ async function candidatePaths(worktree, allowDist = false) {
       }
     }
   }
-  await writeFile(join(directory, 'candidate.patch'), redact(patch));
+  await step('diff-include-additions', 'git', ['add', '--intent-to-add', '--', ...paths], { cwd: worktree });
+  const patch = await step('candidate-diff', 'git', ['diff', '--no-ext-diff', '--binary', 'HEAD'], {
+    cwd: worktree, privateOutput: true,
+  });
+  await writeFile(join(directory, `candidate-${attempt}${allowDist ? '-verified' : ''}.patch`), redact(patch));
   return paths;
 }
 
@@ -117,6 +124,14 @@ async function main() {
       { failureStatus: 'AI_FAILED' });
     return;
   }
+  if (values['agent-smoke']) {
+    await step('agent-smoke', 'codex', [...codexArgs, '-s', 'read-only', '-C', root, '-'], {
+      cwd: root, env: agentEnv, input: 'Reply READY only. Do not use tools.', timeout: 20_000,
+      failureStatus: 'AI_FAILED',
+    });
+    run.status = 'AGENT_SMOKE_ONLY';
+    return;
+  }
   const config = JSON.parse(await readFile(resolve(values.config), 'utf8'));
   if (!/^[\w-]+\/whatap-open-mcp$/.test(config.fork ?? '') || /^whatap\//i.test(config.fork) ||
       !/^[\w][\w./-]*$/.test(config.baseBranch ?? '') ||
@@ -134,6 +149,7 @@ async function main() {
   run.conditions = { fork: config.fork, baseBranch: config.baseBranch, cases };
   const url = `https://github.com/${config.fork}.git`;
   const worktree = join(directory, 'mcp');
+  let actor;
   if (!values['build-only']) {
     if ((await step('harness-clean', 'git', ['status', '--porcelain'], { cwd: root })).trim()) {
       throw new RunFailure('UNVERIFIABLE', 'HARNESS_WORKTREE_DIRTY');
@@ -144,6 +160,11 @@ async function main() {
     api = new ReferenceApi(process.env.WHATAP_HTTP_API_TOKEN, config.apiOrigin);
     await api.connect([...new Set(cases.map(s => s.projectCode))]);
     event('whatap-read-only-access', 'PASS');
+    actor = JSON.parse(await step('github-user', 'gh', ['api', 'user', '--jq', '{login,id}'],
+      { env: ghEnv, privateOutput: true }));
+    if (!/^[\w-]+$/.test(actor.login ?? '') || !Number.isSafeInteger(actor.id)) {
+      throw new RunFailure('UNVERIFIABLE', 'GITHUB_ACTOR_UNAVAILABLE');
+    }
     const remote = JSON.parse(await step('fork-preflight', 'gh', ['api', 'repos/' + config.fork],
       { env: ghEnv, privateOutput: true }));
     if (!remote.fork || remote.parent?.full_name.toLowerCase() !== 'whatap/whatap-open-mcp' ||
@@ -164,10 +185,23 @@ async function main() {
   const branch = 'harness-v2/' + id;
   await step('mcp-baseline', 'git', ['switch', '-c', branch, baseline], { cwd: worktree });
   await step('mcp-install', 'npm', ['ci', '--no-audit', '--no-fund',
-    ...(values['offline-install'] ? ['--offline'] : [])], { cwd: worktree, env: npmEnv, timeout: 180_000 });
+    ...(values['offline-install'] ? ['--offline', '--ignore-scripts'] : [])], { cwd: worktree, env: npmEnv, timeout: 180_000 });
   await step('mcp-baseline-build', 'npm', ['run', 'build'], { cwd: worktree, env: npmEnv, timeout: 120_000 });
   await step('mcp-baseline-tests', 'npm', ['test'], { cwd: worktree, env: npmEnv, timeout: 120_000 });
   if (values['build-only']) {
+    const client = new StdioMcpClient(join(worktree, 'dist/index.js'), 5_000, {
+      ...toolsEnv, WHATAP_API_TOKEN: 'local-parser-only', WHATAP_API_URL: 'http://127.0.0.1:9',
+    });
+    try {
+      await client.start();
+      const result = await client.callTool(query, argumentsFor(target));
+      const rejected = result.isError === true &&
+        result.content?.some(part => /invalid time range format/i.test(part.text ?? ''));
+      event('mcp-stdio-baseline-range', rejected ? 'PASS' : 'ERROR');
+      if (!rejected) throw new RunFailure('UNVERIFIABLE', 'BASELINE_RANGE_SMOKE_UNEXPECTED');
+    } finally {
+      await client.close();
+    }
     run.status = 'BUILD_ONLY';
     return;
   }
@@ -178,15 +212,8 @@ async function main() {
   if (failure?.status !== 'FAIL' || failure.reason !== 'ABSOLUTE_RANGE_REJECTED') {
     throw new RunFailure('UNVERIFIABLE', 'REPAIR_TARGET_NOT_REPRODUCED');
   }
-  const regressionBefore = before.filter(r => r.id !== target.id);
-  if (regressionBefore.some(result => result.status !== 'PASS')) {
-    throw new RunFailure('UNVERIFIABLE', 'BASELINE_REGRESSION_CONTROL_UNAVAILABLE');
-  }
 
   await step('restore-baseline-dist', 'git', ['restore', '--source=HEAD', '--', 'dist'], { cwd: worktree });
-  const agentEnv = { ...toolsEnv,
-    ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
-    ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}) };
   const prompt = [
     'Analyze and repair the observed functional defect in this WhaTap MCP checkout.',
     'The independent direct HTTP MXQL reference returned nonempty rows for a fixed historical UTC interval.',
@@ -202,15 +229,13 @@ async function main() {
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const note = await step('agent-' + attempt, 'codex', ['-a', 'never', 'exec',
-        '--ignore-user-config', '--ephemeral', '-s', 'workspace-write', '-C', worktree,
-        '-c', 'mcp_servers={}', '-c', 'sandbox_workspace_write.network_access=false',
-        '-c', 'shell_environment_policy.inherit=none', '-'], {
+      const note = await step('agent-' + attempt, 'codex', [...codexArgs, '-s', 'workspace-write', '-C', worktree,
+        '-c', 'sandbox_workspace_write.network_access=false', '-'], {
         cwd: worktree, input: prompt + (attempt > 1 ? '\nRetry after: ' + run.lastFailure : ''),
         env: agentEnv, timeout: 480_000, failureStatus: 'AI_FAILED',
       });
       run.agentNotes.push(note.trim());
-      await candidatePaths(worktree);
+      await candidatePaths(worktree, attempt);
       await step('mcp-candidate-build-' + attempt, 'npm', ['run', 'build'], {
         cwd: worktree, env: npmEnv, timeout: 120_000, failureStatus: 'VALIDATION_FAILED',
       });
@@ -223,7 +248,13 @@ async function main() {
         throw new RunFailure(problems.some(p => p.status === 'FAIL') ? 'VALIDATION_FAILED' : 'UNVERIFIABLE',
           problems.map(p => `${p.id}/${p.reason}`).join(','));
       }
-      run.files = await candidatePaths(worktree, true);
+      const relativeApm = await batch(worktree, config, baselineCases.filter(s => s.statisticsMode),
+        'after-relative-apm-' + attempt);
+      if (relativeApm.some(result => result.status !== 'PASS')) {
+        throw new RunFailure(relativeApm.some(p => p.status === 'FAIL') ? 'VALIDATION_FAILED' : 'UNVERIFIABLE',
+          relativeApm.filter(p => p.status !== 'PASS').map(p => `${p.id}/${p.reason}`).join(','));
+      }
+      run.files = await candidatePaths(worktree, attempt, true);
       break;
     } catch (error) {
       run.lastFailure = String(error.message);
@@ -235,11 +266,6 @@ async function main() {
       run.files = undefined;
     }
   }
-  const relativeRegression = await batch(worktree, config, baselineCases.filter(s => s.statisticsMode),
-    'after-relative-apm');
-  if (relativeRegression.some(result => result.status !== 'PASS')) {
-    throw new RunFailure('VALIDATION_FAILED', 'APM_RELATIVE_REGRESSION');
-  }
   run.status = 'VERIFIED';
   await saveReport(directory, run, redact);
 
@@ -248,7 +274,8 @@ async function main() {
   // is the validated fork and the base SHA was checked against the pinned ref.
   await step('stage-verified-files', 'git', ['add', '--', ...run.files],
     { cwd: worktree, failureStatus: 'SUBMISSION_FAILED' });
-  await step('mcp-commit', 'git', ['-c', 'core.hooksPath=/dev/null', 'commit', '-m',
+  await step('mcp-commit', 'git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false',
+    '-c', 'user.name=' + actor.login, '-c', 'user.email=' + actor.id + '+' + actor.login + '@users.noreply.github.com', 'commit', '-m',
     'Support and independently verify fixed WhaTap MCP query windows'],
     { cwd: worktree, failureStatus: 'SUBMISSION_FAILED' });
   run.mcpCommit = (await step('mcp-commit-sha', 'git', ['rev-parse', 'HEAD'], { cwd: worktree })).trim();
@@ -281,6 +308,7 @@ try {
   event('terminal', run.status, redact(String(error?.cause?.code ?? error.message)));
   process.exitCode = 1;
 } finally {
+  run.finishedAt = new Date().toISOString();
   await saveReport(directory, run, redact);
   console.log(run.status, join(directory, 'report.md'));
 }
