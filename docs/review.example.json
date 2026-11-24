@@ -4,8 +4,6 @@
   "candidateCommit": "",
   "harnessCommit": "",
   "publicReviewed": false,
-  "publishCounts": false,
-  "publishSamples": [],
   "runs": [
     {
       "role": "before",

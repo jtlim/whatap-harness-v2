@@ -1,0 +1,7 @@
+{
+  "authorization": "",
+  "projectCodes": [],
+  "fields": ["cpu", "memory_pused", "tps", "tx_error", "tx_count", "count", "tx_time_sum"],
+  "includeDifferences": false,
+  "includeStatistics": false
+}
