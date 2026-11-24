@@ -174,3 +174,16 @@ test('report-only number formatting keeps errors nonzero and exact counts intact
   assert.equal(formatMeasurement('24.123456789'), '24.123457');
   assert.equal(formatMeasurement(undefined, true), undefined);
 });
+
+test('merge rationale renders open prose with lists and a separate final basis', () => {
+  const manifest = { kind: 'audit', baselineCommit: before, candidateCommit: after,
+    harnessCommit: harness, publicReviewed: true,
+    sections: Object.fromEntries(Object.keys(sections).map(k => [k, '검토 문장'])),
+    mergeRationale: [{ ...rationale[0], alternatives: '대안 설명\n\n- 첫째\n- 둘째', mergeBasis: '최종 판단' }] };
+  const { body } = buildReview(manifest, [], [{ label: 'test' }]);
+  const section = body.split('## 변경별 반영 근거\n')[1].split('## 문제와 수정\n')[0];
+  assert.match(section, /### 기술 변경\n\n분류 기능 개선 · 개선 대상 MCP 동작 품질/);
+  assert.match(section, /\*\*대응 가능성과 대안\*\*\n\n대안 설명\n\n- 첫째\n- 둘째/);
+  assert.match(section, /\*\*최종 반영 근거\*\*\n\n최종 판단/);
+  assert.doesNotMatch(section, /<details>|^\|/m);
+});
