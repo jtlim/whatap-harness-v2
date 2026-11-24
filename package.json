@@ -1,0 +1,10 @@
+{
+  "name": "whatap-harness-v2",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "run": "node run.js"
+  }
+}
