@@ -36,7 +36,8 @@ const agentEnv = { ...toolsEnv,
   ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
   ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}) };
 const codexArgs = ['-a', 'never', 'exec', '--ignore-user-config', '--ephemeral',
-  '-c', 'mcp_servers={}', '-c', 'shell_environment_policy.inherit=none'];
+  '-c', 'mcp_servers={}', '-c', 'shell_environment_policy.inherit=none',
+  '-c', 'shell_environment_policy.set.PATH="/usr/local/bin:/usr/bin:/bin"'];
 const gitCredentials = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 const secrets = ['WHATAP_API_TOKEN', 'WHATAP_HTTP_API_TOKEN', 'OPENAI_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN']
   .map(key => process.env[key]).filter(Boolean);
