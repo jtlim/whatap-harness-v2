@@ -4,6 +4,7 @@ import { probe, invalidApmRange } from '../lib/probe.js';
 import { compareApmV2 } from '../lib/apm.js';
 import { parseMcpPeriod } from '../lib/period.js';
 import { ReferenceApi } from '../lib/http.js';
+import { scenarios } from '../lib/scenarios.js';
 
 const start = Date.UTC(2026, 10, 24, 9, 0);
 const end = start + 10_000;
@@ -41,6 +42,44 @@ test('Period keeps milliseconds and rejects impossible or ambiguous dates', () =
   assert.equal(parseMcpPeriod(withMillis).stime, start + 127);
   assert.equal(parseMcpPeriod(period + '\n' + period), null);
   assert.equal(parseMcpPeriod(period.replaceAll('11-24', '02-31')), null);
+});
+
+test('relative comparison sends the ISO Period milliseconds to independent HTTP', async () => {
+  const stime = start + 375;
+  const etime = end + 375;
+  const label = `**Period**: ${new Date(stime).toISOString()} → ${new Date(etime).toISOString()}`;
+  const rows = [{ ...reference[0], time: start + 5000 }, { ...reference[1], time: end }];
+  const markdown = label + '\n\n' + table([{ ...rows[0], tps: '1.23' }, rows[1]], ['time', '_id_', 'tps']);
+  const result = await probe(tool(markdown), { mxql: async (_scenario, window) => {
+    assert.deepEqual(window, { label, stime, etime });
+    return http(rows);
+  } }, series);
+  assert.equal(result.status, 'PASS');
+  assert.equal(parseMcpPeriod(label.replaceAll('11-24', '02-31')), null);
+  assert.equal(parseMcpPeriod(period + '\n' + label), null);
+});
+
+test('Server Absolute requests enough rows for the full 15-minute comparison', async () => {
+  const fixedEnd = start + 900_000;
+  const scenario = scenarios({ serverProject: 1, fixedEnd }).find(s => s.id === 'server-absolute');
+  const rows = Array.from({ length: 900 }, (_, i) => ({
+    time: start + i * 1000, _id_: 'synthetic-server', cpu: 12.34, memory_pused: 56.78,
+  }));
+  const label = `**Period**: ${utc(start)} → ${utc(fixedEnd)}`;
+  const keys = ['time', '_id_', 'cpu', 'memory_pused'];
+  const api = { mxql: async (_scenario, window) => {
+    assert.deepEqual(window, { stime: start, etime: fixedEnd });
+    return http(rows);
+  } };
+  const client = { callTool: async (_name, { limit, timeRange }) => {
+    assert.equal(limit, 1000);
+    assert.equal(timeRange, `${new Date(start).toISOString()}/${new Date(fixedEnd).toISOString()}`);
+    return tool(label + '\n\n' + table(rows.slice(0, limit), keys)).callTool();
+  } };
+  assert.equal((await probe(client, api, scenario)).reason, 'ROWS_AND_PERIOD_MATCH');
+
+  const truncated = tool(label + '\n\n' + table(rows.slice(0, 500), keys) + '\n\nResult may be truncated');
+  assert.equal((await probe(truncated, api, scenario)).reason, 'MISSING_OR_EXTRA_RECORDS');
 });
 
 test('relative query without Period does not make a reference call', async () => {
