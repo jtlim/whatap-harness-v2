@@ -1,99 +1,61 @@
 # WhaTap AI Agent Harness v2
 
-깨끗한 WhaTap MCP에서 고정 조회 구간 문제를 재현하고, Codex CLI에 분석과 수정을 맡긴 뒤 별도 검증기로 수정 결과를 확인합니다. 통과하면 본인 MCP Fork에 새 브랜치를 Push하고 사람 검토용 PR을 엽니다.
-
-현재 작업의 실제 검증 범위와 남은 조건은 [실행 기록](docs/execution.md)에 있습니다.
+Codex에 “MCP의 APM 조회 기능을 검수해 줘”처럼 요청합니다. Codex는 저장소의 [작업 지침](AGENTS.md)에 따라 검증 시나리오를 선택하고, 독립 비교 결과로 원인을 분석한 뒤 MCP 또는 Harness를 수정하고 재검증합니다. 변경은 저장소별 PR로 제출하며 사용자가 검토와 Merge를 담당합니다.
 
 ## 준비
 
-- Linux Ubuntu, Bash, Git, Node.js 22, npm, GitHub CLI 및 Codex CLI. Codex CLI는 `exec --ignore-user-config`, `--ephemeral`을 지원해야 합니다. 로컬 검증에는 Node.js 22.23.5와 Codex CLI 0.171.0을 사용했습니다.
-- `codex login status`로 자동 실행에 사용할 인증을 준비합니다. Codex가 세션을 초기화할 수 있는 쓰기 가능한 사용자 설정 디렉터리와 AI 서비스 네트워크 접근이 필요합니다.
-- `gh auth status` 및 `gh api user --jq .login`으로 계정과 연결을 확인합니다. GitHub CLI 계정에는 MCP Fork의 브랜치 Push와 PR 생성 권한이 필요합니다.
-- npm 레지스트리, 데모 API, GitHub에 연결되는 셸에서 실행합니다. 쓰기 가능한 임시 디렉터리와 실행 결과 보관용 디스크 공간을 준비합니다.
-- WhaTap 데모 담당자가 제공한 Server 프로젝트 코드, APM 프로젝트 코드와 읽기 전용 계정 API 토큰을 준비합니다.
-
-MCP Fork에는 아래 기준 커밋을 가리키는 깨끗한 기준 브랜치가 있어야 합니다. 기존 Fork의 `submission`이 이 커밋을 가리키면 그대로 사용합니다. 다른 곳을 가리키면 원격 브랜치를 이동시키지 말고, 검증 전용 기준 브랜치를 새로 만들어 `baseBranch`에 지정합니다.
-
-```text
-c1001155538114e811e8ecf311904723aa131115
-```
-
-신규 브랜치가 필요한 경우 본인 Fork의 복제본에서 다음 명령을 사용합니다.
+Linux, Bash, Git, Node.js 22, npm과 Codex를 사용합니다. PR 제출에는 GitHub CLI와 Fork 쓰기 권한이 필요합니다. Harness 자체의 npm 의존성은 없습니다. MCP 원본 기준은 `c1001155538114e811e8ecf311904723aa131115`입니다.
 
 ```bash
-git fetch https://github.com/whatap/whatap-open-mcp.git c1001155538114e811e8ecf311904723aa131115
-git push origin FETCH_HEAD:refs/heads/harness-baseline
-```
-
-## 설정 및 실제 실행
-
-Harness의 `submission`을 체크아웃한 뒤 아래 명령을 실행합니다. Harness 자체의 npm 의존성은 없습니다.
-
-```bash
-cp config.example.json config.local.json
+cp -n config.example.json config.local.json
 chmod 600 config.local.json
 npm test
+npm run run -- --list
 ```
 
-`config.local.json`의 `fork`를 본인 MCP Fork로 지정하고 `baseBranch`를 위에서 확인한 브랜치로, 두 프로젝트 코드를 각각 실제 데모 프로젝트의 숫자 코드로 바꿉니다. 선택 사항인 `fixedEnd`는 데이터가 이미 발행된 UTC 종료 시각을 Unix 밀리초로 고정하며 5분 경계에 정렬해야 합니다. 기본값은 실행 시각보다 적어도 20분 앞선 최근 5분 경계입니다. 절대시간 조회는 해당 종료 시각까지의 15분을 검증합니다. `apiOrigin`을 생략하면 `https://api.whatap.io`를 사용합니다.
+`config.local.json`에 데모 Server와 APM 프로젝트의 숫자 코드(`serverProject`, `apmProject`)를 입력합니다. `WHATAP_API_TOKEN`과 `WHATAP_HTTP_API_TOKEN`은 기존 비밀 관리 방식으로 환경에 주입합니다. 기본 API 주소는 `https://api.whatap.io`이며, 로컬 설정의 `apiOrigin`에는 승인된 WhaTap 데모 주소만 설정합니다. `fork`와 `baseBranch`는 아래의 레거시 자동 제출 명령에서만 사용됩니다.
 
-토큰은 비밀 관리 도구 또는 셸 환경으로 공급합니다. 아래 예는 대화형 입력을 최초 실행 **전에** 수행하며 입력을 화면에 표시하지 않습니다. 동일한 읽기 전용 계정 토큰이 두 클라이언트에 허용된 경우 같은 값을 공급할 수 있습니다.
+## Codex에서 검수하기
+
+Harness 저장소를 프로젝트로 열고 자연어로 요청합니다. Codex가 시나리오를 선택하며 같은 명령을 각 빌드 체크아웃에 사용할 수 있습니다. 사람도 아래 명령으로 직접 재현할 수 있습니다.
 
 ```bash
-read -rs -p 'WhaTap MCP token: ' WHATAP_API_TOKEN
-printf '\n'
-read -rs -p 'WhaTap HTTP reference token: ' WHATAP_HTTP_API_TOKEN
-printf '\n'
-export WHATAP_API_TOKEN WHATAP_HTTP_API_TOKEN
-npm run run
+node verify.js --list
+node verify.js --mcp /path/to/built-baseline --select apm --select timeseries --phase before
+node verify.js --mcp /path/to/built-candidate --select server-absolute --phase after --fixed-end "$fixed_end"
+node verify.js --replay runs/실행ID/report.json
 ```
 
-실행기가 매회 독립 클론과 `harness-v2/<실행 ID>` 브랜치를 만듭니다. 기준 MCP 빌드 및 테스트부터 접속 검증, 수정, 재검증, Commit·Push·PR까지 자동 실행합니다. 실행 결과가 `SUBMITTED`이면 로컬 보고서의 PR URL에서 diff와 결과를 확인하고 사람이 Merge합니다.
+`--mcp`는 대상 Git 체크아웃이며 먼저 그 위치에서 `npm ci`, `npm run build`, `npm test`를 수행합니다. `--select`를 생략하면 등록된 9개 시나리오를 실행합니다. `all`, `server`, `apm`, `timeseries`, `range` 또는 개별 ID를 선택할 수 있습니다. `timeseries`는 APM의 TPS·오류 건수 시계열을 선택합니다. `--request`에는 로컬 보고서에 남길 요청 요약을 넣을 수 있습니다.
 
-## 판정과 아티팩트
+절대시간 전후 비교에는 두 명령에 같은 `--fixed-end`를 적용합니다. 이 값은 5분 경계의 UTC Unix 밀리초이며, 종료 시각까지의 15분을 검증합니다. 생략하면 로컬 설정의 `fixedEnd`, 그 값도 없으면 실행 시각보다 최소 20분 앞선 최신 5분 경계를 사용합니다. 상대시간은 MCP의 실제 출력 Period를 독립 HTTP 요청에 그대로 전달합니다.
 
-| 영역 | 확인 사항 |
+시나리오 배치에는 최대 8분, MCP 호출당 45초, HTTP 요청당 30초 제한을 적용합니다. Harness는 배치 안에서 자동 재시도하지 않습니다. Codex가 근거를 확인한 후 정책 범위에서 재시도합니다. 무인 Codex CLI 세션에는 예를 들어 `timeout --kill-after=10s 35m codex exec "MCP 전체를 검수해 줘"`로 전체 실행 시간을 제한할 수 있습니다. 개별 수정과 테스트에는 [작업 지침](AGENTS.md)의 제한을 적용합니다.
+
+## 검증 기준과 결과
+
+| 영역 | 기계적 검증 |
 | --- | --- |
-| Server | 상대시간 5분과 고정 15분의 Period, CPU·메모리 값, 전체 행 및 포맷된 요약 |
-| APM | 트랜잭션 호출·오류·응답시간 합계와 예외 발생 건수, 잘못된 기간 오류 구분, 표시 행 정확성, 절대구간의 전체 5분 버킷별 원본과 v2 그룹 집계 |
-| 시계열 | TPS·오류 건수의 5초 격자, 모든 동일 키의 값, 누락과 제한 |
+| Server | 상대·절대 조회 기간, CPU·메모리 값, 행 키와 완전성, 출력 요약 |
+| APM | 상대·절대 트랜잭션·예외 통계, 표시 제한 안내, 그룹 합계, 고정 구간의 별도 v2 집계, 잘못된 기간 오류 |
+| 시계열 | TPS·오류 건수 값, 전체 5초 격자, 중복·누락·조회 제한 |
 
-상대시간은 MCP가 출력한 UTC Period를 밀리초로 파싱해 독립 HTTP에 그대로 전달합니다. 절대시간 기준은 명시한 고정 입력이며 MCP 응답의 Period도 정확히 일치해야 합니다. 지원하지 않는 고정 기간을 깨끗한 기준 MCP가 명시적으로 거부하고 같은 기간의 독립 HTTP에 유효한 행이 있을 때만 Codex 수정을 시작합니다. 수정 전후 상대시간 조회는 각각의 독립 기준과 대조합니다.
+MCP 표의 수치는 기존 표시 정밀도로 비교합니다. APM 표시가 제한되면 명시적으로 안내된 표시 행 전체를 대조합니다. 별도 v2 집계는 절대 구간에서 검증합니다. 기준 HTTP 데이터가 희소하거나 제한되거나 API 간 의미가 다른 경우 확인 가능한 범위를 판정에 반영합니다. 이는 MCP가 출력한 데이터와 요약의 일치 검증입니다. 자유 형식 Codex 답변의 모든 수치·추론이나 등록 시나리오 외 도구는 기계적으로 판정하지 않으므로 검수 보고서에 해당 범위를 적습니다.
 
-표의 숫자는 MCP 자릿수 표현에 맞춰 비교합니다. APM 표시가 제한되면 제한 고지가 있는 경우에만 해당 표시 행 전부를 대조하며, 고정 시간에서는 전체 HTTP MXQL과 별도 v2 API를 추가로 대조합니다. 참조 API의 누락, 조회 제한이나 역할이 다른 API 간 불일치로 검증이 불가능하면 코드 오류로 단정할 근거로 사용하지 않습니다.
+`verify.js`의 종료 코드는 `0` 검증 통과, `1` 검증 실패, `2` 검증 불가 또는 환경·인증 문제입니다. 개별 판정과 상세 사유는 `runs/실행ID/report.json`과 한국어 `report.md`에 기록하며, 대상 Git SHA와 빌드 산출물 SHA-256도 남깁니다. 증거만 재생할 때는 기존 요청과 HTTP 시간 구간을 재확인하고 이전 판정과 현재 판정을 함께 기록합니다. 과거 보고서에서 MCP 오류 플래그를 복원한 경우는 JSON에 표시됩니다. 재생에는 실제 API 접근이 필요하지 않습니다.
 
-`runs/<ID>/report.md`는 한국어 판정 및 AI 분석, `report.json`은 요청 조건·원본 응답·실제 비교값·집계·판정 근거를 담습니다. 후보 diff와 명령 로그도 같은 로컬 디렉터리에 있습니다. `public.md`와 PR 본문은 실행기에서 정해진 상태·검증 항목으로 생성합니다. 실제 응답, 프로젝트 코드와 AI 출력은 서비스 정보가 포함될 수 있어 로컬에만 보존합니다. 토큰은 도구별 환경으로 전달하고 검증 보고서에서 알려진 계정·프로젝트 토큰을 제거합니다. Codex에는 서비스 토큰과 원본 데이터를 주지 않습니다.
+원본 응답, 프로젝트 코드와 실제 조회 조건은 권한이 제한된 로컬 실행 디렉터리에 보존합니다. `public.md`는 비식별 판정 요약입니다. PR 본문에는 리뷰에 필요한 분석과 비식별 근거를 사용합니다.
 
-| 상태 | 의미 |
-| --- | --- |
-| `SUBMITTED` | 독립 검증과 MCP 회귀 테스트를 마쳤고 PR URL을 받았습니다. |
-| `AI_FAILED` | Codex 시작, 응답 또는 실행에 실패했습니다. |
-| `VALIDATION_FAILED` | 후보 변경 범위, 빌드, 기존 테스트 또는 독립 데이터 비교가 통과하지 못했습니다. |
-| `UNVERIFIABLE` | 인증·네트워크·참조 데이터 부족 등으로 완료를 판정할 수 없습니다. |
-| `SUBMISSION_FAILED` | 검증 이후 Commit·Push·PR 단계가 완료되지 않았습니다. 로컬 보고서와 커밋을 확인할 수 있습니다. |
+## 실행 보고와 제출
 
-자동 수정은 2회 이내이며 각 시도는 최대 8분입니다. 명령별 빌드·테스트·GitHub·MCP·HTTP 제한 시간도 적용합니다. 재시도는 독립적인 새 MCP 클론에서 후보 변경만 초기화하고 기준과 판정 규칙을 유지합니다.
+검증 배치가 남긴 보고서와 JSON을 근거로 Codex가 전체 작업의 한국어 보고서를 완성합니다. 여러 배치가 있는 경우 시도별 실행 ID를 연결합니다.
 
-## 분리된 진단 실행
+- 작업 개요에 요청, 검수 범위, 기준과 후보 SHA, 환경과 선택 시나리오를 기록합니다.
+- 문제마다 재현 절차, 관찰 결과, 기대 동작, 원인과 책임 영역, 영향, 수정 필요성을 기록합니다.
+- 변경 파일, 선택한 방법과 대안, 기술적 근거, 기존 동작에 미치는 영향을 설명합니다.
+- 전후 MCP·HTTP 비교를 각 배치의 로컬 증거와 연결합니다. 조회 기간, 식별자·수치·누락·중복·집계 검사, 빌드·회귀 결과와 Harness 판정 차이를 포함합니다. 상대시간은 각 응답과 그 응답의 독립 기준을 비교합니다.
+- 최종 결과에 재시도 이력, 해결 여부, 검증 한계, 재현 명령, 관련 커밋과 PR을 기록합니다. 변경한 저장소에만 PR을 제출합니다.
 
-```bash
-# 실제 Codex 실행환경 점검. 질문만 보내며 코드 변경은 수행하지 않습니다.
-node run.js --agent-smoke
+## 기존 진단 재현
 
-# 의도적인 비정상 종료로 실패 분류 및 리포트를 검증합니다. 종료 코드는 1입니다.
-node run.js --failure-example
-
-# 원본 MCP 빌드 및 테스트와 stdio 오류 응답 확인. 데모 서비스·AI·GitHub를 사용하지 않습니다.
-node run.js --config config.example.json --local-source /path/to/original-mcp --build-only
-```
-
-오프라인 빌드 진단에는 기존 npm 캐시를 쓰기 가능한 디렉터리에 복사한 뒤 `npm_config_cache`로 지정하고 `--offline-install`을 추가합니다. 이때 잠금 파일대로 설치하되 패키지 설치 스크립트를 건너뛰므로 Linux용 esbuild 선택 패키지도 캐시에 있어야 합니다.
-
-## 설계와 한계
-
-- Node 기본 기능, Codex CLI, Git과 GitHub CLI를 사용했습니다. 실행 순서는 기준 검사 → 수정 → 재검증 → 제출이며, Harness를 실행 중에 수정하는 경로는 없습니다.
-- 비교 검증기는 API 호출 및 에이전트와 분리했습니다. 이전 Harness에서 stdio, Period 파서, 숫자·시계열 비교, APM 집계 비교 부분을 가져왔습니다. 앱 실행기와 보고서는 별도 구현입니다.
-- 시나리오 정의는 `lib/scenarios.js`, 도구·HTTP 비교는 `lib/probe.js`에 있습니다. 프로젝트·기준 브랜치·기준 시점 변경은 로컬 설정으로 처리할 수 있습니다. 새 지표는 같은 검증 모델에 시나리오 정의를 추가할 수 있습니다. 신규 결함 유형은 재현 기준과 코딩 에이전트 작업 지시의 정의가 필요합니다.
-- 5분 버킷 데이터가 없는 희소 프로젝트, 보존 기간을 지난 구간, API 페이지 제한 및 서로 다른 백엔드 응답은 `UNVERIFIABLE`이 될 수 있습니다. 표시 제한이 있는 APM 결과를 전체 MCP 결과로 해석하지 않습니다. 대상 범위는 MCP 표와 요약이며 자유 형식 AI 답변은 검증하지 않습니다.
-- 데모 값은 조회 사이에 변할 수 있습니다. MCP와 HTTP는 순차 조회하고 상대시간 기준으로 MCP가 반환한 시각을 그대로 사용합니다. 백엔드 요청 시점이나 조회 중 동시성에 따른 변화를 하네스가 추정하지 않습니다.
-- 자동 제출은 직접 관리하는 Fork에서만 실행합니다. PR 단계가 막힌 경우 로컬 검증 증거를 먼저 확인하고 기록된 브랜치와 커밋으로 제출을 복구할 수 있습니다.
+`node run.js --build-only --local-source /path/to/original-mcp --config config.example.json`은 기존 원본 빌드·회귀·오류 응답 진단입니다. `--failure-example`은 통제된 AI 실행 실패를, `--agent-smoke`는 Codex 초기화를 검사합니다. 과거 고정 시나리오의 Full Build는 기록 재현용으로 `node run.js --legacy-full`에서 명시적으로 실행할 수 있습니다. 이 모드는 고정 UTC 구간 MCP 수정과 GitHub 제출을 시도하므로 일반 검수에는 Codex와 `verify.js`를 사용합니다. 기존 결과는 [실행 기록](docs/execution.md)을 참조합니다.

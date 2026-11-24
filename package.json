@@ -7,6 +7,6 @@
   },
   "scripts": {
     "test": "node --experimental-test-isolation=none --test test/*.test.js",
-    "run": "node run.js"
+    "run": "node verify.js"
   }
 }
