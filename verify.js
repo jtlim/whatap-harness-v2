@@ -181,7 +181,7 @@ if (process.argv.length === 3 && process.argv[2] === '--list') {
 } else {
   await mkdir(join(root, 'runs'), { recursive: true, mode: 0o700 });
   const directory = await mkdtemp(join(root, 'runs', new Date().toISOString().replace(/[:.]/g, '-') + '-'));
-  const run = { id: basename(directory), baseline, status: 'UNVERIFIABLE', events: [], probes: [],
+  const run = { id: basename(directory), baseline, status: 'UNVERIFIABLE', startedAt: new Date().toISOString(), events: [], probes: [],
     environment: { node: process.version, platform: process.platform, arch: process.arch } };
   await execute(run, directory);
 }

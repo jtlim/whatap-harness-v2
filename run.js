@@ -9,7 +9,7 @@ import { StdioMcpClient } from './lib/mcp.js';
 import { argumentsFor, invalidApmRange, probe, query } from './lib/probe.js';
 import { baseline, scenarios } from './lib/scenarios.js';
 import { candidateScopeValid, existingTestDiff } from './lib/scope.js';
-import { publicReport, saveReport } from './lib/report.js';
+import { saveReport } from './lib/report.js';
 
 process.umask(0o077);
 const root = fileURLToPath(new URL('.', import.meta.url));
@@ -26,7 +26,7 @@ const { values } = parseArgs({ options: {
 await mkdir(join(root, 'runs'), { recursive: true, mode: 0o700 });
 const directory = await mkdtemp(join(root, 'runs', new Date().toISOString().replace(/[:.]/g, '-') + '-'));
 const id = directory.split('/').at(-1);
-const run = { id, status: 'UNVERIFIABLE', baseline, events: [], probes: [], agentNotes: [] };
+const run = { id, status: 'UNVERIFIABLE', baseline, startedAt: new Date().toISOString(), events: [], probes: [], agentNotes: [] };
 const toolsEnv = Object.fromEntries(['PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR']
   .filter(key => process.env[key]).map(key => [key, process.env[key]]));
 const npmEnv = { ...toolsEnv, npm_config_cache: process.env.npm_config_cache ?? join(tmpdir(), 'whatap-v2-npm-cache'),
@@ -272,38 +272,9 @@ async function main() {
     }
   }
   run.status = 'VERIFIED';
-  await saveReport(directory, run, redact);
 
-  const owner = config.fork.split('/')[0];
-  // gh does not need the candidate's origin to create a PR. The destination
-  // is the validated fork and the base SHA was checked against the pinned ref.
-  await step('stage-verified-files', 'git', ['add', '--', ...run.files],
-    { cwd: worktree, failureStatus: 'SUBMISSION_FAILED' });
-  await step('mcp-commit', 'git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false',
-    '-c', 'user.name=' + actor.login, '-c', 'user.email=' + actor.id + '+' + actor.login + '@users.noreply.github.com', 'commit', '-m',
-    'Support and independently verify fixed WhaTap MCP query windows'],
-    { cwd: worktree, failureStatus: 'SUBMISSION_FAILED' });
-  run.mcpCommit = (await step('mcp-commit-sha', 'git', ['rev-parse', 'HEAD'], { cwd: worktree })).trim();
-  const base = (await step('fork-base-before-push', 'gh', ['api',
-    'repos/' + config.fork + '/git/ref/heads/' + config.baseBranch, '--jq', '.object.sha'],
-    { env: ghEnv, failureStatus: 'SUBMISSION_FAILED' })).trim();
-  if (base !== baseline) throw new RunFailure('SUBMISSION_FAILED', 'FORK_BASE_MOVED');
-  await step('mcp-push', 'git', [...gitCredentials, 'push', url, `HEAD:refs/heads/${branch}`],
-    { cwd: worktree, env: ghEnv, timeout: 120_000, failureStatus: 'SUBMISSION_FAILED' });
-  const prBody = join(directory, 'pr-body.md');
-  const design = '## 변경 내용\n\nwhatap_query_data의 timeRange에 UTC ISO 8601 시작/종료 구간을 추가했습니다. ' +
-    'MCP가 거부하던 동일 절대 구간을 독립 HTTP 기준 데이터로 확인했습니다. 기존 상대시간은 각 응답 Period와 비교했습니다. ' +
-    '전체 MCP 테스트, 서버 지표, APM 통계 및 오류 처리, 5초 시계열 검증을 완료했습니다.\n';
-  await writeFile(prBody, publicReport(run) + '\n' + design);
-  run.pr = (await step('mcp-pr', 'gh', ['pr', 'create', '--repo', config.fork,
-    '--base', config.baseBranch, '--head', owner + ':' + branch,
-    '--title', 'Support fixed UTC query windows in whatap_query_data',
-    '--body-file', prBody], { cwd: worktree, env: ghEnv, timeout: 90_000,
-    failureStatus: 'SUBMISSION_FAILED' })).trim();
-  if (!/^https:\/\/github\.com\/[\w-]+\/whatap-open-mcp\/pull\/\d+$/i.test(run.pr)) {
-    throw new RunFailure('SUBMISSION_FAILED', 'PR_URL_MISSING');
-  }
-  run.status = 'SUBMITTED';
+  event('submission', 'REVIEW_REQUIRED', 'Use review.js with the verified local candidate before submitting.');
+
 }
 
 try {
