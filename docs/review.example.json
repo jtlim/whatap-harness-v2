@@ -4,7 +4,6 @@
   "candidateCommit": "",
   "harnessCommit": "",
   "publicReviewed": false,
-  "publishCounts": false,
   "runs": [
     {
       "role": "before",
@@ -37,5 +36,20 @@
     "limits": "",
     "instructions": "",
     "evidence": ""
-  }
+  },
+  "mergeRationale": [
+    {
+      "title": "",
+      "classification": "",
+      "scope": "",
+      "unchanged": "",
+      "userImpact": "",
+      "alternatives": "",
+      "choice": "",
+      "benefit": "",
+      "compatibility": "",
+      "mergeBasis": ""
+    }
+  ],
+  "testDetails": ""
 }
