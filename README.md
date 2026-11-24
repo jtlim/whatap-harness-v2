@@ -58,4 +58,20 @@ MCP 표의 수치는 기존 표시 정밀도로 비교합니다. APM 표시가 �
 
 ## 기존 진단 재현
 
-`node run.js --build-only --local-source /path/to/original-mcp --config config.example.json`은 기존 원본 빌드·회귀·오류 응답 진단입니다. `--failure-example`은 통제된 AI 실행 실패를, `--agent-smoke`는 Codex 초기화를 검사합니다. 과거 고정 시나리오의 Full Build는 기록 재현용으로 `node run.js --legacy-full`에서 명시적으로 실행할 수 있습니다. 이 모드는 고정 UTC 구간 MCP 수정과 GitHub 제출을 시도하므로 일반 검수에는 Codex와 `verify.js`를 사용합니다. 기존 결과는 [실행 기록](docs/execution.md)을 참조합니다.
+`node run.js --build-only --local-source /path/to/original-mcp --config config.example.json`은 기존 원본 빌드·회귀·오류 응답 진단입니다. `--failure-example`은 통제된 AI 실행 실패를, `--agent-smoke`는 Codex 초기화를 검사합니다. 과거 고정 시나리오의 Full Build는 기록 재현용으로 `node run.js --legacy-full`에서 명시적으로 실행할 수 있습니다. 이 모드는 고정 UTC 구간 MCP 수정과 로컬 검증을 수행하므로 일반 검수에는 Codex와 `verify.js`를 사용합니다. 기존 결과는 [실행 기록](docs/execution.md)을 참조합니다.
+
+## 보고서 생성과 PR 제출
+
+새 환경에서는 이 저장소를 Clone한 뒤 Node.js 22와 Git을 준비하고 위 예시로 `config.local.json`을 설정합니다. 읽기 전용 토큰은 환경변수로 주입합니다. Codex에서 이 저장소를 프로젝트로 열면 버전 관리된 `AGENTS.md`가 적용됩니다. 홈 디렉터리의 Codex 설정이나 이전 실행 기록은 필요하지 않습니다.
+
+`verify.js`는 각 배치의 `report.json`에 실제 요청, MCP 원문, HTTP 응답, 비교용 키·필드, 원본 및 표시 변환 후 최대 오차, 행 수, 누락·중복, 표본, 집계 판정과 종료 이유를 저장합니다. `report.md`의 JSON 포인터로 해당 비교를 찾을 수 있습니다. 원래 비교가 키 차이에서 종료된 경우에도 교집합의 진단 통계를 볼 수 있으며, 이 수치는 원래 성공 판정에 사용되지 않습니다. APM의 표시 범위 밖 HTTP 행도 통계에서 별도로 확인합니다.
+
+1. [보고서 입력 양식](docs/review.example.json)을 쓰기 제한된 작업 실행 디렉터리로 복사하고 14개 항목을 채웁니다. `kind`는 `mcp`, `harness`, `audit` 중 하나입니다. MCP 수정은 깨끗한 기준과 검증을 통과한 깨끗한 후보의 실제 실행 JSON을 `before`, `after` 역할로 제공합니다. 실패는 `failure`, 이전 증거는 `history`, 재생은 `replay` 역할로 연결합니다. 비데이터 검증은 동일 입력의 수정 전후 결과와 테스트 로그를 첨부합니다.
+2. `attachments`에는 로그 또는 비교 증거를 연결합니다. 테스트나 재현 로그에 각각 `role: "test"` 또는 `role: "reproduction"`을 지정합니다. Harness 변경은 `role: "comparison"`의 동일 입력 전후 근거도 필요합니다. 입력 양식 기준 상대 경로를 사용합니다. `sections`의 문장은 공개에 적합하게 작성하고, 공개 범위를 확인한 뒤 `publicReviewed`를 설정합니다. `publishCounts`는 공개가 허용된 행 수를 자동으로 싣는 선택입니다. 대표 원본 값과 요청 인수는 로컬 보고서에서 확인합니다.
+3. 출력 디렉터리는 아직 존재하지 않는 경로를 지정합니다. 아래 명령은 원본 파일을 읽고 새 디렉터리에만 출력합니다.
+
+```bash
+node review.js build runs/task/review.json runs/task/published-review
+```
+
+`pr-body.md`는 제출용입니다. `report.md`와 `evidence.json`은 제출용 설명에 실제 데이터 표본·통계를 연결한 로컬 산출물입니다. 원본 파일과 테스트 로그의 상대 경로 및 SHA-256을 로컬 색인에 남깁니다. 권한 있는 리뷰어는 PR에 적힌 실행 ID의 `runs/<실행 ID>/report.json`을 열거나 승인된 환경에서 재현할 수 있습니다. 객관적인 증거가 없으면 해당 항목에 이유를 남깁니다. 출력 검사를 통과한 후 별도 작업 브랜치에서 `gh pr create --body-file` 또는 `gh pr edit --body-file`로 제출합니다.

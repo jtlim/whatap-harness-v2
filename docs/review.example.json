@@ -1,0 +1,41 @@
+{
+  "kind": "mcp",
+  "baselineCommit": "",
+  "candidateCommit": "",
+  "harnessCommit": "",
+  "publicReviewed": false,
+  "publishCounts": false,
+  "runs": [
+    {
+      "role": "before",
+      "path": "../runs/BEFORE/report.json"
+    },
+    {
+      "role": "after",
+      "path": "../runs/AFTER/report.json"
+    }
+  ],
+  "attachments": [
+    {
+      "label": "테스트 결과",
+      "role": "test",
+      "path": "../runs/.../tests.log"
+    }
+  ],
+  "sections": {
+    "overview": "",
+    "reproduction": "",
+    "cause": "",
+    "impact": "",
+    "changes": "",
+    "before": "",
+    "after": "",
+    "statistics": "",
+    "comparison": "",
+    "tests": "",
+    "retries": "",
+    "limits": "",
+    "instructions": "",
+    "evidence": ""
+  }
+}

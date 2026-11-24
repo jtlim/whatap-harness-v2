@@ -1,0 +1,44 @@
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { buildReview } from './lib/review.js';
+
+process.umask(0o077);
+const [command, manifestPath, directory] = process.argv.slice(2);
+if (command !== 'build' || !manifestPath || !directory || process.argv.length !== 5) {
+  console.error('Usage: node review.js build MANIFEST.json NEW_OUTPUT_DIRECTORY');
+  process.exit(2);
+}
+try {
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const root = dirname(resolve(manifestPath));
+  const digest = data => createHash('sha256').update(data).digest('hex');
+  const runs = [];
+  const attachments = [];
+  for (const entry of manifest.runs ?? []) {
+    const data = await readFile(resolve(root, entry.path));
+    runs.push({ role: entry.role, run: JSON.parse(data) });
+    attachments.push({ label: entry.role, path: entry.path, sha256: digest(data) });
+  }
+  for (const entry of manifest.attachments ?? []) {
+    const data = await readFile(resolve(root, entry.path));
+    if (!entry.label || !data.length) throw Error('REVIEW_ATTACHMENT_EMPTY');
+    attachments.push({ label: entry.label, role: entry.role, path: entry.path, sha256: digest(data) });
+  }
+  if (!attachments.some(a => a.role === 'test' || a.role === 'reproduction'))
+    throw Error('REVIEW_TEST_OR_REPRODUCTION_ATTACHMENT_REQUIRED');
+  const result = buildReview(manifest, runs, attachments);
+  const tokens = ['WHATAP_API_TOKEN', 'WHATAP_HTTP_API_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'OPENAI_API_KEY']
+    .map(k => process.env[k]).filter(Boolean);
+  if (tokens.some(t => result.body.includes(t)) ||
+      /gh[pousr]_[a-zA-Z0-9]{25,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9_-]{20,}/.test(result.body))
+    throw Error('CREDENTIAL_IN_PUBLIC_REVIEW');
+  await mkdir(directory, { mode: 0o700 });
+  await writeFile(resolve(directory, 'pr-body.md'), result.body);
+  await writeFile(resolve(directory, 'report.md'), result.local);
+  await writeFile(resolve(directory, 'evidence.json'), JSON.stringify(result.evidence, null, 2) + '\n');
+  console.log(resolve(directory, 'pr-body.md'));
+} catch (error) {
+  console.error(error.code ?? error.message);
+  process.exitCode = 1;
+}
