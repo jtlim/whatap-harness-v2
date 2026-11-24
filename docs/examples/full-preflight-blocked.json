@@ -1,0 +1,28 @@
+{
+  "scope": "full run stopped during preflight",
+  "id": "2026-11-24T10-48-21-001Z-OOv6TY",
+  "status": "UNVERIFIABLE",
+  "baseline": "c1001155538114e811e8ecf311904723aa131115",
+  "harness": "f056496036ca4761bbc1d558e9f8ffa85b49916e",
+  "finishedAt": "2026-11-24T10:48:21.017Z",
+  "events": [
+    {
+      "at": "2026-11-24T10:48:21.007Z",
+      "stage": "harness-head",
+      "status": "PASS",
+      "detail": "exit=0"
+    },
+    {
+      "at": "2026-11-24T10:48:21.017Z",
+      "stage": "harness-clean",
+      "status": "PASS",
+      "detail": "exit=0"
+    },
+    {
+      "at": "2026-11-24T10:48:21.017Z",
+      "stage": "terminal",
+      "status": "UNVERIFIABLE",
+      "detail": "WHATAP_DEMO_TOKENS_MISSING"
+    }
+  ]
+}

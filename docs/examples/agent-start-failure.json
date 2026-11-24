@@ -1,0 +1,28 @@
+{
+  "scope": "real Codex subprocess startup failure",
+  "id": "2026-11-24T10-48-21-062Z-QkAnwU",
+  "status": "AI_FAILED",
+  "baseline": "c1001155538114e811e8ecf311904723aa131115",
+  "harness": "f056496036ca4761bbc1d558e9f8ffa85b49916e",
+  "finishedAt": "2026-11-24T10:48:21.175Z",
+  "events": [
+    {
+      "at": "2026-11-24T10:48:21.069Z",
+      "stage": "harness-head",
+      "status": "PASS",
+      "detail": "exit=0"
+    },
+    {
+      "at": "2026-11-24T10:48:21.175Z",
+      "stage": "agent-smoke",
+      "status": "ERROR",
+      "detail": "exit=1"
+    },
+    {
+      "at": "2026-11-24T10:48:21.175Z",
+      "stage": "terminal",
+      "status": "AI_FAILED",
+      "detail": "agent-smoke:1"
+    }
+  ]
+}

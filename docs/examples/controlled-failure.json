@@ -1,0 +1,28 @@
+{
+  "scope": "intentional subprocess exit",
+  "id": "2026-11-24T10-48-21-217Z-ZJacIh",
+  "status": "AI_FAILED",
+  "baseline": "c1001155538114e811e8ecf311904723aa131115",
+  "harness": "f056496036ca4761bbc1d558e9f8ffa85b49916e",
+  "finishedAt": "2026-11-24T10:48:21.249Z",
+  "events": [
+    {
+      "at": "2026-11-24T10:48:21.223Z",
+      "stage": "harness-head",
+      "status": "PASS",
+      "detail": "exit=0"
+    },
+    {
+      "at": "2026-11-24T10:48:21.249Z",
+      "stage": "agent-failure-example",
+      "status": "ERROR",
+      "detail": "exit=17"
+    },
+    {
+      "at": "2026-11-24T10:48:21.249Z",
+      "stage": "terminal",
+      "status": "AI_FAILED",
+      "detail": "agent-failure-example:17"
+    }
+  ]
+}
