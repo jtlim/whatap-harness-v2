@@ -8,6 +8,7 @@ import { ReferenceApi } from './lib/http.js';
 import { StdioMcpClient } from './lib/mcp.js';
 import { argumentsFor, invalidApmRange, probe, query } from './lib/probe.js';
 import { baseline, scenarios } from './lib/scenarios.js';
+import { candidateScopeValid, existingTestDiff } from './lib/scope.js';
 import { publicReport, saveReport } from './lib/report.js';
 
 process.umask(0o077);
@@ -19,6 +20,7 @@ const { values } = parseArgs({ options: {
   'offline-install': { type: 'boolean' },
   'failure-example': { type: 'boolean' },
   'agent-smoke': { type: 'boolean' },
+  'legacy-full': { type: 'boolean' },
 } });
 
 await mkdir(join(root, 'runs'), { recursive: true, mode: 0o700 });
@@ -71,13 +73,12 @@ async function step(label, executable, args, options = {}) {
 }
 
 async function candidatePaths(worktree, attempt, allowDist = false) {
-  const changed = (await step('diff-paths', 'git', ['diff', '--name-only', '-z', 'HEAD'], { cwd: worktree })).split('\0');
+  const changed = (await step('diff-paths', 'git', ['diff', '--no-renames', '--name-only', '-z', 'HEAD'], { cwd: worktree })).split('\0');
   const added = (await step('new-paths', 'git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: worktree })).split('\0');
   const paths = [...new Set([...changed, ...added].filter(Boolean))].sort();
-  if (!paths.some(path => path.startsWith('src/')) ||
-      !paths.every(path => /^(?:src|tests)\/[\w./-]+\.ts$/.test(path) ||
-        (allowDist && /^dist\/index\.(?:js|js\.map|d\.ts)$/.test(path))) ||
-      changed.some(path => path.startsWith('tests/'))) {
+  const existingTestChanges = (await step('existing-test-changes', 'git', existingTestDiff,
+    { cwd: worktree })).split('\0').filter(Boolean);
+  if (!candidateScopeValid(paths, existingTestChanges, allowDist)) {
     throw new RunFailure('VALIDATION_FAILED', 'CANDIDATE_SCOPE_INVALID');
   }
   for (const path of paths) {
@@ -132,6 +133,9 @@ async function main() {
     });
     run.status = 'AGENT_SMOKE_ONLY';
     return;
+  }
+  if (!values['build-only'] && !values['legacy-full']) {
+    throw new RunFailure('UNVERIFIABLE', 'USE_VERIFY_JS_OR_SELECT_LEGACY_MODE');
   }
   const config = JSON.parse(await readFile(resolve(values.config), 'utf8'));
   if (!/^[\w-]+\/whatap-open-mcp$/.test(config.fork ?? '') || /^whatap\//i.test(config.fork) ||
