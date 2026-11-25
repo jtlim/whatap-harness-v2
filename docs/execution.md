@@ -19,6 +19,12 @@
 
 PR에서 보호된 프로젝트·행 식별자와 조회 UTC 시각 대신 가명과 상대 위치를 사용한 표본을 확인할 수 있습니다. 권한이 있는 실행 환경에서는 `runs/<실행 ID>/report.json`, `report.md`와 `runs/setup/review-final/report.md`, `evidence.json`을 확인할 수 있습니다. 원본과 로컬 빌드·테스트 로그는 저장소에 포함되지 않습니다. 새 환경에서 같은 종류의 근거가 필요하면 [설치 및 환경 구성](installation.md)과 [직접 검증](usage.md#직접-검증)을 따릅니다.
 
+## 서버 CPU AI 답변 검증 사례
+
+실행 `ai-cpu-BbopqF`에서 현재 Codex 세션이 실제 MCP의 선택 서버 CPU 행을 읽고 최종 JSON 답변을 작성했습니다. 답변을 저장한 후 Harness가 독립 HTTP를 처음 조회했습니다. MCP 데이터 비교와 AI 답변 비교가 각각 PASS였고, 요청 조건·표본 수·평균·최대가 비교 기준을 충족했습니다. 사용한 MCP는 [PR #8](https://github.com/jtlim/whatap-open-mcp/pull/8)의 검증된 빌드입니다.
+
+답변 원문, 실제 조회 조건과 수치, 독립 계산은 실행 환경의 `runs/ai-cpu-BbopqF/report.md`와 `report.json`에서 확인할 수 있습니다. 별도 통제 테스트는 평균·최대·표본 수·조회 조건 오류, 형식 오류, 불완전한 HTTP, MCP와 AI 책임 분리를 검사합니다. 이 테스트 입력은 실제 Codex 답변과 별개입니다. [재현 절차](usage.md#서버-cpu-ai-답변-검증)
+
 ## 이전 검수 결과
 
 검수는 깨끗한 기준에서 실제 데이터를 다시 조회하고 독립 HTTP로 대조했습니다. 아래 URL과 실행 ID는 과제의 역사적 결과입니다. 해당 계정이나 저장소 이름은 새 사용자의 설정 요구사항과 무관합니다.
