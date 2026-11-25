@@ -7,18 +7,18 @@
   "runs": [
     {
       "role": "before",
-      "path": "../runs/BEFORE/report.json"
+      "path": "../BEFORE/report.json"
     },
     {
       "role": "after",
-      "path": "../runs/AFTER/report.json"
+      "path": "../AFTER/report.json"
     }
   ],
   "attachments": [
     {
       "label": "테스트 결과",
       "role": "test",
-      "path": "../runs/.../tests.log"
+      "path": "tests.log"
     }
   ],
   "sections": {
