@@ -10,14 +10,14 @@
 | 보고서 출력의 `pr-body.md` | GitHub PR에 올릴 본문 |
 | 보고서 출력의 `report.md`, `evidence.json` | 각 시도의 결과, 원본 JSON 포인터, 비교 근거와 첨부 로그의 경로·SHA-256 |
 
-배치에는 실제 비교에 사용한 키, 필드, 기간, MCP·HTTP 표본, 누락·중복·집계, 정규화 전후 최대 오차가 기록됩니다. 키 차이로 판정이 끝난 경우 교집합 통계는 별도의 진단입니다. APM 표시 범위 밖의 HTTP 행도 통계에서 확인할 수 있습니다. 상대시간의 전후 값은 각각의 Period에 대한 기준 응답과 비교합니다.
+배치에는 실제 비교에 사용한 키, 필드, 기간, MCP·HTTP 표본, 누락·중복·집계, 정규화 전후 최대 오차가 기록됩니다. 키 차이로 판정이 끝난 경우 교집합 통계는 별도의 진단입니다. APM 표시 범위 밖의 HTTP 행도 통계에서 확인할 수 있습니다. 상대시간의 전후 값은 각각의 검증된 Period에 대한 기준 응답과 비교합니다. 전후 실제 측정값과 통제된 재현 결과를 구분합니다.
 
 ## Codex의 보고서 생성
 
 Codex가 입력을 작성하고 사용자는 증거와 최종 반영 근거를 검토합니다. 기록된 보고서를 다시 생성할 때도 다음 계약을 사용합니다.
 
 1. **Harness 루트**에서 [예제 매니페스트](review.example.json)를 로컬 작업 디렉터리에 복사합니다. `kind`는 변경 대상에 따라 `mcp`, `harness`, `audit`로 지정합니다. 기준·후보·Harness의 전체 커밋 SHA를 채웁니다.
-2. `runs`에 실행별 원본 `report.json`을 연결합니다. MCP 변경 보고서에는 깨끗한 원본과 검증을 통과한 깨끗한 후보의 실제 실행을 `before`, `after`로 연결합니다. 보고서 빌더는 지정한 MCP/Harness SHA와 실행 증거, 전후 고정 구간의 일치를 확인합니다. 과거 근거, 실패, 재생은 각각 `history`, `failure`, `replay`로 구분합니다.
+2. `runs`에 실행별 원본 `report.json`을 연결합니다. MCP 변경 보고서에는 깨끗한 원본과 검증을 통과한 깨끗한 후보의 실제 실행을 `before`, `after`로 연결합니다. 보고서 빌더는 지정한 MCP/Harness SHA와 실행 증거, 전후 기본 검증 조건과 선택한 고정 구간의 일치를 확인합니다. 과거 근거, 실패, 재생은 각각 `history`, `failure`, `replay`로 구분합니다.
 3. `attachments`에 `test` 또는 `reproduction` 역할의 로그를 연결합니다. Harness 변경은 동일 입력을 대조한 `comparison` 첨부도 필요합니다. 경로는 매니페스트 파일 기준 상대 경로로 해석됩니다.
 4. `sections`의 14개 항목을 채워 재현, 원인, 영향, 변경, 테스트, 실패 이력, 한계와 근거를 설명합니다. 모든 섹션 문장은 공개 범위를 따릅니다. 공개용 본문 검토 후 `publicReviewed`를 설정합니다.
 5. MCP·Harness 수정은 변경마다 `mergeRationale`을 제공합니다. 유지 시 위험, 서비스 영향, 대안, 선택 이유, 이점, 호환성 및 최종 반영 근거를 기록합니다. 예제의 분류와 대상 항목에는 아래 값을 사용합니다. 변경 없는 `audit`는 생략할 수 있습니다.
@@ -80,10 +80,10 @@ gh pr create --repo "$MCP_FORK" --base "$BASE_BRANCH" --head "$HEAD_BRANCH" \
   --title "변경 요약" --body-file runs/task/published-review/pr-body.md
 ```
 
-`PR_NUMBER`에 갱신할 PR 번호를 먼저 지정한 뒤, 기존 PR의 본문 갱신에는 `gh pr edit "$PR_NUMBER" --repo "$MCP_FORK" --body-file runs/task/published-review/pr-body.md`를 사용할 수 있습니다. 제목, 코드 차이, 검증 실패와 한계, 공개된 비교 표본을 확인한 뒤 사용자가 GitHub에서 최종 Merge합니다. 객관적 근거가 없으면 그 이유를 보고합니다.
+`PR_NUMBER`에 갱신할 PR 번호를 먼저 지정한 뒤, 기존 PR의 본문 갱신에는 `gh pr edit "$PR_NUMBER" --repo "$MCP_FORK" --body-file runs/task/published-review/pr-body.md`를 사용할 수 있습니다. 제목, 코드 차이, 검증 실패와 한계, 공개된 비교 표본을 확인한 뒤 사용자가 GitHub에서 최종 Merge합니다. 객관적 결함 근거가 없으면 수정이 필요 없는 이유, 기능 미지원 근거와 검증 한계를 보고합니다.
 
 ## 기존 근거로 재생성
 
 - **보고서 서식만 재생성.** 기존 원본과 테스트 로그를 가리키는 매니페스트를 `review.js build`에 전달합니다. 새 출력 경로를 사용하면 기존 실행 파일을 보존합니다.
-- **판정 재생.** `node verify.js --replay runs/실행ID/report.json`은 저장된 MCP 요청·응답과 독립 HTTP 구간이 맞는지 확인하고 이전·현재 판정을 새 실행에 함께 남깁니다. 과거 오류 플래그를 추정한 경우 표시됩니다. 재생에는 서비스 접근이 필요하지 않습니다.
+- **판정 재생.** `node verify.js --replay runs/실행ID/report.json`은 저장된 MCP 요청·응답과 독립 HTTP 구간이 맞는지 확인하고 이전·현재 판정을 새 실행에 함께 남깁니다. 과거 오류 플래그를 추정한 경우 표시됩니다. 상대 요청에 호출 시각이 저장되지 않았다면 시간 근거가 부족해 `UNVERIFIABLE`이 될 수 있습니다. 재생에는 서비스 접근이 필요하지 않습니다.
 - **실데이터 재검증.** 새로운 검증을 주장하려면 [직접 검증](usage.md#직접-검증)을 실행합니다. 저장 입력 재생은 최신 실제 서비스 검증 근거와 구분합니다.

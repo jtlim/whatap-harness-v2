@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { probe, invalidApmRange } from '../lib/probe.js';
+import { probe as liveProbe, invalidApmRange } from '../lib/probe.js';
 import { compareApmV2 } from '../lib/apm.js';
 import { parseMcpPeriod } from '../lib/period.js';
 import { ReferenceApi } from '../lib/http.js';
-import { scenarios } from '../lib/scenarios.js';
+import { scenarios, validationScenarios } from '../lib/scenarios.js';
 
 const start = Date.UTC(2026, 10, 24, 9, 0);
 const end = start + 10_000;
+const probe = (client, api, scenario, now = () => end) => liveProbe(client, api, scenario, { now });
 const utc = time => new Date(time).toISOString().replace('T', ' ').replace('Z', ' UTC');
 const period = `**Period**: ${utc(start)} → ${utc(end)}`;
 const series = { id: 'series', domain: 'timeseries', projectCode: 1, path: 'v2/app/tps_pcode',
@@ -40,6 +41,8 @@ test('relative comparison uses the displayed Period exactly and honors display r
 test('Period keeps milliseconds and rejects impossible or ambiguous dates', () => {
   const withMillis = period.replaceAll('.000', '.127');
   assert.equal(parseMcpPeriod(withMillis).stime, start + 127);
+  const mixedPrecision = `**Period**: ${utc(start).replace('.000', '')} → ${utc(end + 375)}`;
+  assert.deepEqual(parseMcpPeriod(mixedPrecision), { label: mixedPrecision, stime: start, etime: end + 375 });
   assert.equal(parseMcpPeriod(period + '\n' + period), null);
   assert.equal(parseMcpPeriod(period.replaceAll('11-24', '02-31')), null);
 });
@@ -53,7 +56,7 @@ test('relative comparison sends the ISO Period milliseconds to independent HTTP'
   const result = await probe(tool(markdown), { mxql: async (_scenario, window) => {
     assert.deepEqual(window, { label, stime, etime });
     return http(rows);
-  } }, series);
+  } }, series, () => etime);
   assert.equal(result.status, 'PASS');
   assert.equal(parseMcpPeriod(label.replaceAll('11-24', '02-31')), null);
   assert.equal(parseMcpPeriod(period + '\n' + label), null);
@@ -164,4 +167,70 @@ test('the rendered metric summary is checked against independent unrounded value
   const wrong = await probe(tool(text + '\n\n**Summary** (2 rows): **tps** (1.2–2, avg 9.9)'), api, series);
   assert.equal(right.status, 'PASS');
   assert.equal(wrong.reason, 'MCP_SUMMARY_MISMATCH');
+});
+
+test('a stale, future, malformed or wrong-duration Period fails before HTTP', async () => {
+  const api = { mxql: () => assert.fail('invalid Period must never select the reference window') };
+  const text = texts(reference);
+  for (const [markdown, now, reason] of [
+    [text, end + 1000, 'MCP_PERIOD_OUTSIDE_CALL'],
+    [text, end - 1, 'MCP_PERIOD_OUTSIDE_CALL'],
+    [text.replace(utc(end), utc(end - 1000)), end, 'MCP_PERIOD_MISMATCH'],
+    [text.replaceAll(' UTC', ' KST'), end, 'MCP_PERIOD_INVALID'],
+    [text + '\n**Period**: invalid', end, 'MCP_PERIOD_INVALID'],
+  ]) {
+    const result = await probe(tool(markdown), api, series, () => now);
+    assert.equal(result.status, 'FAIL');
+    assert.equal(result.reason, reason);
+  }
+  assert.equal((await liveProbe(tool(text), api, series, { timing: null })).status, 'UNVERIFIABLE');
+  assert.equal((await probe(tool('Invalid time range format', true), api, series)).status, 'FAIL');
+  assert.equal((await probe(tool('No rows returned.'), api, series)).status, 'UNVERIFIABLE');
+});
+
+test('legacy seconds admit only the compatible part of the call clock', async () => {
+  const text = texts([{ ...reference[0], tps: '1.23' }, reference[1]]).replaceAll('.000 UTC', ' UTC');
+  const result = await probe(tool(text), { mxql: async () => http(reference) }, series, () => end + 999);
+  assert.equal(result.status, 'PASS');
+  const precise = await probe(tool(texts(reference)), {}, series, () => end + 1);
+  assert.equal(precise.reason, 'MCP_PERIOD_OUTSIDE_CALL');
+});
+
+test('relative APM compares the full Period through MXQL and complete buckets through v2', async () => {
+  const settings = { ...series, domain: 'apm', timeRange: '15m', expectedStepMs: undefined,
+    statisticsMode: 'transaction', crossCheckStats: true, groupKeys: ['tx_hash'],
+    matchKeys: ['time', 'tx_hash'], compareFields: ['tx_count', 'tx_error', 'tx_time_sum'] };
+  const etime = start + 900_375;
+  const stime = start + 375;
+  const rows = [300_000, 600_000, 900_000].map(offset => ({
+    time: start + offset, tx_hash: 1, tx_count: 2, tx_error: 1, tx_time_sum: 4,
+  }));
+  const text = `**Period**: ${utc(stime)} → ${utc(etime)}\n\n` +
+    table(rows, settings.matchKeys.concat(settings.compareFields));
+  const api = {
+    mxql: async (_s, w) => {
+      assert.deepEqual([w.stime, w.etime], [stime, etime]);
+      return http(rows);
+    },
+    stats: async (_s, w) => {
+      assert.deepEqual(w, { stime: start + 300_000, etime: start + 900_000 });
+      return http({ total: 1, retrievedTotal: 1, data: [{ serviceHash: 1, count: 4, error: 2, timeSum: 8 }] });
+    },
+  };
+  const result = await probe(tool(text), api, settings, () => etime);
+  assert.equal(result.status, 'PASS');
+  assert.ok(result.checks.some(c => c.code === 'APM_V2_AGGREGATES' && c.ok));
+});
+
+test('the default suite has one relative query per dataset and keeps statistics checks', () => {
+  const config = { serverProject: 1, apmProject: 2, fixedEnd: start + 900_000 };
+  const defaults = validationScenarios(config);
+  assert.deepEqual(defaults.map(s => s.id), [
+    'server-relative', 'apm-transactions', 'apm-exceptions', 'apm-tps', 'apm-error-series', 'apm-invalid-range',
+  ]);
+  assert.ok(defaults.every(s => !s.fixed && (s.timeRange || s.negative)));
+  assert.ok(defaults.filter(s => s.statisticsMode && !s.negative).every(s => s.crossCheckStats));
+  const feature = validationScenarios(config, { absolute: true });
+  assert.equal(feature.filter(s => s.fixed).length, 3);
+  assert.equal(feature.filter(s => s.negative && s.invalidTimeRange).length, 3);
 });

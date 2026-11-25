@@ -59,6 +59,11 @@ test('review gates sections, disclosure and live evidence and keeps actual rows 
   assert.throws(() => buildReview({ ...manifest, publicReviewed: false }, runs, attachments), /DISCLOSURE/);
   assert.throws(() => buildReview({ ...manifest, sections: {} }, runs, attachments), /SECTION_MISSING/);
   assert.throws(() => buildReview(manifest, runs.slice(0, 1), attachments), /EVIDENCE_REQUIRED after/);
+  const modern = structuredClone(runs);
+  for (const { run } of modern) run.conditions.suite = 'default';
+  assert.doesNotThrow(() => buildReview(manifest, modern, attachments));
+  modern[1].run.conditions.cases = [{ ...scenario, projectCode: scenario.projectCode + 1 }];
+  assert.throws(() => buildReview(manifest, modern, attachments), /DEFAULT_REVIEW_CONDITIONS_MISMATCH/);
   assert.throws(() => buildReview(manifest, [runs[0], { ...runs[1], run: { ...runs[1].run, mode: 'replay' } }], attachments),
     /EVIDENCE_REQUIRED after/);
 });

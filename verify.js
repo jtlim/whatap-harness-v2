@@ -6,13 +6,16 @@ import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { ReferenceApi } from './lib/http.js';
 import { StdioMcpClient } from './lib/mcp.js';
 import { command } from './lib/process.js';
-import { invalidApmRange, probe } from './lib/probe.js';
+import { invalidApmRange, probe, query } from './lib/probe.js';
 import { saveReport } from './lib/report.js';
 import { baseline, validationScenarios } from './lib/scenarios.js';
 
 process.umask(0o077);
 const root = dirname(fileURLToPath(import.meta.url));
-const catalog = validationScenarios({ serverProject: 1, apmProject: 2 });
+const catalogConfig = { serverProject: 1, apmProject: 2 };
+const catalog = validationScenarios(catalogConfig);
+const featureCatalog = validationScenarios(catalogConfig, { absolute: true });
+const historicalIds = ['apm-transactions-relative', 'apm-exceptions-relative'];
 const groups = ['all', 'server', 'apm', 'timeseries', 'range'];
 const options = {
   config: { type: 'string', default: join(root, 'config.local.json') },
@@ -21,6 +24,8 @@ const options = {
   phase: { type: 'string', default: 'audit' },
   request: { type: 'string' },
   replay: { type: 'string' },
+  feature: { type: 'string' },
+  'fixed-start': { type: 'string' },
   'fixed-end': { type: 'string' },
 };
 const tokens = ['WHATAP_API_TOKEN', 'WHATAP_HTTP_API_TOKEN', 'OPENAI_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN']
@@ -44,6 +49,7 @@ function classify(result) {
       /auth|unauthori[sz]ed|forbidden/i.test(evidence.mcpIsError ? evidence.mcpText : '')) {
     return '환경·인증 문제';
   }
+  if (result.status === 'UNSUPPORTED') return '기능 미지원';
   if (result.status === 'PASS') return '정상 검증 통과';
   if (result.status === 'FAIL') {
     return result.reason === 'ABSOLUTE_RANGE_REJECTED' ? 'MCP 구현 결함' : '검증 실패';
@@ -79,8 +85,8 @@ async function replay(run, values) {
   for (const saved of input.probes ?? []) {
     const def = definitions.find(s => s.id === saved.id) ??
       (saved.id === 'apm-invalid-range' && definitions.find(s => s.statisticsMode));
-    const { args, mcpText, mcpIsError, reference, referenceV2 } = saved.evidence ?? {};
-    const negative = saved.id === 'apm-invalid-range';
+    const { args, mcpText, mcpIsError, reference, referenceV2, callTiming } = saved.evidence ?? {};
+    const negative = def?.negative ?? saved.id === 'apm-invalid-range';
     const scenario = { ...def, id: saved.id, negative };
     if (!matches(values.select, scenario)) continue;
     const legacy = typeof mcpIsError !== 'boolean';
@@ -107,7 +113,7 @@ async function replay(run, values) {
         return response;
       };
       current = negative ? await invalidApmRange({ callTool }, scenario) :
-        await probe({ callTool }, { mxql: readResponse(reference), stats: readResponse(referenceV2) }, scenario);
+        await probe({ callTool }, { mxql: readResponse(reference), stats: readResponse(referenceV2) }, scenario, { timing: callTiming ?? null });
     }
     addProbe(run, saved.phase, current);
     run.replay.push({ phase: saved.phase, id: saved.id, legacyErrorFlagInferred: legacy,
@@ -118,13 +124,24 @@ async function replay(run, values) {
 async function live(run, values) {
   const config = JSON.parse(await readFile(resolve(values.config), 'utf8'));
   if (values['fixed-end'] !== undefined) config.fixedEnd = Number(values['fixed-end']);
-  if (![config.serverProject, config.apmProject].every(n => Number.isSafeInteger(n) && n > 0) ||
-      (config.fixedEnd !== undefined && (!Number.isSafeInteger(config.fixedEnd) ||
-        config.fixedEnd <= 900_000 || config.fixedEnd > Date.now() || config.fixedEnd % 300_000 !== 0))) {
+  if (![config.serverProject, config.apmProject].every(n => Number.isSafeInteger(n) && n > 0)) {
     throw new Error('CONFIG_PROJECT_OR_WINDOW');
   }
-  const cases = validationScenarios(config).filter(s => matches(values.select, s));
-  run.conditions = { cases };
+  if (values.feature === 'absolute' && config.fixedEnd !== undefined &&
+      (!Number.isSafeInteger(config.fixedEnd) || config.fixedEnd <= 900_000 || config.fixedEnd > Date.now())) {
+    throw new Error('CONFIG_PROJECT_OR_WINDOW');
+  }
+  const cases = validationScenarios(config, { absolute: values.feature === 'absolute' }).filter(s => matches(values.select, s));
+  for (const scenario of cases.filter(s => s.fixed)) {
+    const { etime } = scenario.fixed;
+    const stime = values['fixed-start'] === undefined ? scenario.fixed.stime : Number(values['fixed-start']);
+    if (![stime, etime].every(t => Number.isSafeInteger(t) && t > 0) || etime > Date.now() || stime >= etime ||
+        (scenario.statisticsMode && (stime % 300_000 !== 0 || etime % 300_000 !== 0))) {
+      throw new Error('CONFIG_PROJECT_OR_WINDOW');
+    }
+    scenario.fixed = { stime, etime };
+  }
+  run.conditions = { cases, suite: values.feature ?? 'default' };
   if (!values.mcp) throw new Error('MCP_CHECKOUT_REQUIRED');
   const checkout = resolve(values.mcp);
   const entry = join(checkout, 'dist/index.js');
@@ -141,8 +158,16 @@ async function live(run, values) {
   const client = new StdioMcpClient(entry, 45_000, env, signal);
   try {
     const projects = [...new Set(cases.filter(s => !s.negative).map(s => s.projectCode))];
-    if (projects.length) await api.connect(projects);
     await client.start();
+    const tools = await client.listTools();
+    run.capabilities = { tools: tools.map(tool => tool.name), query: tools.find(tool => tool.name === query) ?? null };
+    if (!run.capabilities.query) {
+      for (const scenario of cases) addProbe(run, values.phase, {
+        id: scenario.id, status: 'UNSUPPORTED', reason: 'MCP_TOOL_NOT_ADVERTISED', checks: [], evidence: {},
+      });
+      return;
+    }
+    if (projects.length) await api.connect(projects);
     for (const scenario of cases) {
       signal.throwIfAborted();
       const result = scenario.negative ? await invalidApmRange(client, scenario) : await probe(client, api, scenario);
@@ -156,7 +181,14 @@ async function live(run, values) {
 
 async function main(run) {
   const { values } = parseArgs({ options });
-  if (values.select.some(id => !groups.includes(id) && !catalog.some(s => s.id === id))) {
+  if (values.feature !== undefined && values.feature !== 'absolute') throw new Error('UNKNOWN_FEATURE');
+  if ((values['fixed-end'] !== undefined || values['fixed-start'] !== undefined) && values.feature !== 'absolute')
+    throw new Error('FIXED_WINDOW_REQUIRES_ABSOLUTE_FEATURE');
+  if (values['fixed-start'] !== undefined && values['fixed-end'] === undefined) throw new Error('FIXED_END_REQUIRED');
+  const selectedCatalog = values.replay ? [...catalog, ...featureCatalog] :
+    values.feature === 'absolute' ? featureCatalog : catalog;
+  if (values.select.some(id => !groups.includes(id) && !selectedCatalog.some(s => s.id === id) &&
+      !(values.replay && historicalIds.includes(id)))) {
     throw new Error('UNKNOWN_SCENARIO');
   }
   if (!/^[a-zA-Z0-9_-]{1,50}$/.test(values.phase)) throw new Error('INVALID_PHASE');
@@ -166,18 +198,21 @@ async function main(run) {
   run.harness = harness.commit;
   run.environment.harnessDirty = harness.dirty;
   if (values.replay) {
-    if (values.mcp || values['fixed-end']) throw new Error('REPLAY_OPTION_CONFLICT');
+    if (values.mcp || values.feature || values['fixed-end']) throw new Error('REPLAY_OPTION_CONFLICT');
     await replay(run, values);
   } else {
     await live(run, values);
   }
   if (!run.probes.length) throw new Error('NO_SCENARIO_RESULT');
   run.status = run.probes.some(p => p.status === 'FAIL') ? 'VALIDATION_FAILED' :
+    run.probes.every(p => p.status === 'UNSUPPORTED') ? 'UNSUPPORTED' :
     run.probes.some(p => p.status !== 'PASS') ? 'UNVERIFIABLE' : 'VERIFIED';
 }
 
 if (process.argv.length === 3 && process.argv[2] === '--list') {
   for (const scenario of catalog) console.log(scenario.id, scenario.domain);
+  console.log('server-cpu-ai server (node verify-ai.js)');
+  for (const scenario of featureCatalog) console.log(scenario.id, scenario.domain, '(--feature absolute)');
 } else {
   await mkdir(join(root, 'runs'), { recursive: true, mode: 0o700 });
   const directory = await mkdtemp(join(root, 'runs', new Date().toISOString().replace(/[:.]/g, '-') + '-'));

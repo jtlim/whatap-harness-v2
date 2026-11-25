@@ -88,3 +88,42 @@ test('AI execution failure is distinct from wrong data', async () => {
   assert.equal(ai.status, 'AI_FAILED');
   assert.equal(ai.responsibility, 'AI_EXECUTION');
 });
+
+test('relative CPU uses the captured Period and unaligned 5-second grid', async () => {
+  const relative = cpuScenario(1, '-123');
+  const input = capture();
+  input.call = mcpCall(relative);
+  assert.equal(input.call.args.timeRange, '1m');
+  const relativeEnd = etime - 375;
+  const relativeStart = stime - 375;
+  input.result.content[0].text = input.result.content[0].text
+    .replace(iso(stime), iso(relativeStart)).replace(iso(etime), iso(relativeEnd));
+  input.callTiming = { startedAt: relativeEnd, finishedAt: etime + 200 };
+  const submission = { text: JSON.stringify({ ...answer, startUtc: iso(relativeStart), endUtc: iso(relativeEnd) }) };
+  const { mcp, ai } = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(mcp.status, 'PASS');
+  assert.equal(ai.status, 'PASS');
+  input.callTiming.startedAt += 1;
+  const stale = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(stale.mcp.reason, 'MCP_PERIOD_OUTSIDE_CALL');
+  assert.equal(stale.ai.status, 'UNVERIFIABLE');
+});
+
+test('only a matching interior with exchanged edge rows establishes a precision limit', async () => {
+  const relative = cpuScenario(1, '-123');
+  const input = capture([...rows.slice(1), { ...rows[0], time: etime }]);
+  input.call = mcpCall(relative);
+  input.callTiming = { startedAt: etime + 79, finishedAt: etime + 205 };
+  input.result.content[0].text = input.result.content[0].text
+    .replace(iso(stime), iso(stime).replace('T', ' ').replace('.000Z', ' UTC'))
+    .replace(iso(etime), iso(etime).replace('T', ' ').replace('.000Z', ' UTC'));
+  const submission = { text: JSON.stringify(answer) };
+  const limited = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(limited.mcp.reason, 'MCP_PERIOD_PRECISION_LIMIT');
+  assert.equal(limited.ai.status, 'UNVERIFIABLE');
+
+  input.result.content[0].text = input.result.content[0].text.replace('12.23', '99.00');
+  const defective = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(defective.mcp.reason, 'FIELD_MISMATCH');
+  assert.equal(defective.mcp.status, 'FAIL');
+});
