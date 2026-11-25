@@ -135,3 +135,31 @@ test('CPU answer processing retains a verified MCP key defect without an HTTP re
   assert.equal(mcp.reason, 'MCP_RECORD_IDENTITIES_INVALID');
   assert.equal(ai.status, 'UNVERIFIABLE');
 });
+
+test('a complete CPU cadence can have a constant nonzero UTC phase', async () => {
+  const shifted = rows.map(row => ({ ...row, time: row.time + 1000 }));
+  const { mcp, ai } = await check(answer, capture(shifted), { ...reference, body: shifted });
+  assert.equal(mcp.status, 'PASS');
+  assert.equal(ai.status, 'PASS');
+  const irregular = shifted.map((row, i) => i === 3 ? { ...row, time: row.time + 1 } : row);
+  assert.equal((await check(answer, capture(irregular), { ...reference, body: irregular })).ai.status, 'UNVERIFIABLE');
+});
+
+test('another server exchange does not invalidate an identical selected CPU window', async () => {
+  const relative = cpuScenario(1, '-123');
+  const selected = rows.map(row => ({ ...row, time: row.time + 1000 }));
+  const other = { ...rows[0], _id_: -987 };
+  const input = capture([...selected, { ...other, time: etime }]);
+  input.call = mcpCall(relative);
+  input.callTiming = { startedAt: etime + 79, finishedAt: etime + 205 };
+  input.result.content[0].text = input.result.content[0].text
+    .replace(iso(stime), iso(stime).replace('T', ' ').replace('.000Z', ' UTC'))
+    .replace(iso(etime), iso(etime).replace('T', ' ').replace('.000Z', ' UTC'));
+  const submission = { text: JSON.stringify(answer) };
+  const http = { ...reference, body: [...selected, other] };
+  const result = await verifyCpuAnswer(relative, input, submission, http);
+  assert.equal(result.mcp.reason, 'MCP_PERIOD_PRECISION_LIMIT');
+  assert.equal(result.ai.status, 'PASS');
+  const wrong = { text: JSON.stringify({ ...answer, averageCpu: 99 }) };
+  assert.equal((await verifyCpuAnswer(relative, input, wrong, http)).ai.status, 'FAIL');
+});

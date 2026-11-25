@@ -281,3 +281,35 @@ test('candidate keys are checked even when HTTP fails or APM would filter the re
   assert.equal(invalid.reason, 'AMBIGUOUS_RECORD_IDENTITIES');
   assert.match(invalid.checks.at(-1).detail, /API 중복=1/);
 });
+
+test('a bounded server display must match the independently selected prefix', async () => {
+  const scenario = { ...series, domain: 'server', path: 'v2/sys/server_base',
+    expectedStepMs: undefined, limit: 2 };
+  const rows = Array.from({ length: 4 }, (_, i) => ({ time: start + i * 1000, _id_: 'fixture', tps: i }));
+  const api = { mxql: async () => http(rows) };
+  const run = (shown, notice = true, label = period, now = () => end) =>
+    probe(tool(label + '\n' + table(shown, ['time', '_id_', 'tps']) +
+      (notice ? '\nResult may be truncated' : '')), api, scenario, now);
+  assert.equal((await run([rows[1], rows[0]])).reason, 'DISCLOSED_SAMPLE_MATCH');
+  assert.equal((await run(rows.slice(0, 2), false)).reason, 'MISSING_OR_EXTRA_RECORDS');
+  assert.equal((await run([rows[0]])).reason, 'MISSING_OR_EXTRA_RECORDS');
+  assert.equal((await run([rows[0], rows[2]])).reason, 'MISSING_OR_EXTRA_RECORDS');
+  assert.equal((await run([rows[0], { ...rows[1], tps: 99 }])).reason, 'FIELD_MISMATCH');
+  assert.equal((await run(rows.slice(0, 3))).reason, 'MCP_DISPLAY_LIMIT_EXCEEDED');
+  const legacy = period.replaceAll('.000 UTC', ' UTC');
+  assert.equal((await run(rows.slice(1, 3), true, legacy, () => end + 200)).reason, 'DISCLOSED_SAMPLE_MATCH');
+  assert.equal((await run(rows.slice(2), true, legacy, () => end + 200)).reason, 'MISSING_OR_EXTRA_RECORDS');
+});
+
+test('sparse edge exchange needs both timing and corroborated identities', async () => {
+  const label = period.replaceAll('.000 UTC', ' UTC');
+  const rows = [{ ...reference[0], tps: '1.23' }, reference[1], { ...reference[0], _id_: 'sparse' }];
+  const api = { mxql: async () => http(rows) };
+  const run = (last, timing) => liveProbe(tool(label + '\n' +
+    table([rows[1], last], ['time', '_id_', 'tps'])), api, series, { timing });
+  const known = { ...rows[0], time: end };
+  const shifted = { startedAt: end + 50, finishedAt: end + 100 };
+  assert.equal((await run(known, shifted)).reason, 'MCP_PERIOD_PRECISION_LIMIT');
+  assert.equal((await run({ ...known, _id_: 'new' }, shifted)).status, 'FAIL');
+  assert.equal((await run(known, { ...shifted, startedAt: end })).status, 'FAIL');
+});
