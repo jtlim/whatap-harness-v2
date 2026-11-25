@@ -29,6 +29,18 @@ Codex가 입력을 작성하고 사용자는 증거와 최종 반영 근거를 �
 | `classification` | 구현 결함 수정, 기능 개선, 호환성 개선, 보고·운영 개선 |
 | `scope` | MCP 동작 품질, Harness 검증, Harness 보고·운영 |
 
+### 변경 및 실행 근거 구조
+
+성공한 MCP 수정 매니페스트는 Git에서 저장한 통합 패치 파일을 `role: "diff"`로 연결하고, `testDetails` 배열에 실제 테스트 명령·목적·판정·종료 코드·첨부 이름·로그의 근거 문자열을 입력합니다. 예를 들어 테스트 로그 첨부의 `label`이 `MCP unit`이면 테스트에 `evidence: "MCP unit"`과 로그에 있는 성공 요약을 `proof`로 지정합니다. 빌더는 첨부 내용에서 문자열의 존재, 종료 코드 조건, Git diff 형식을 확인합니다. 과거 실패 로그에서 종료 코드를 별도로 수집하지 않았다면 `exitCode: null`과 사유를 기록합니다. 선언한 명령이 실제로 실행됐는지와 분석·수정 이유의 사실성까지 자동으로 보증하지는 않습니다.
+
+```json
+{"command":"npm test","purpose":"CPU 값 전달 회귀","status":"PASS","exitCode":0,"evidence":"MCP unit","proof":"Tests  148 passed"}
+```
+
+공개 승인 검토를 마친 소스 코드만 `codePublicReviewed: true`로 지정합니다. 변경된 파일 이름은 Git diff로 생성하고 배포 번들의 패치 본문은 로컬 첨부에 보관합니다. `outcome`은 변경 성공이면 `VERIFIED`(기본값)입니다. 실패 보고는 실제 근거와 함께 `VALIDATION_FAILED`, `UNVERIFIABLE`, `AI_FAILED`를 명시합니다. 테스트를 수행하지 않은 경우에는 `status: "NOT_RUN"`과 사유를 기록합니다. 변경 없는 감사에는 Git diff나 성공 테스트를 요구하지 않습니다.
+
+기본 전후 표 외에 `history`, `failure`, `replay`의 시나리오와 AI 답변 판정 및 검사항목을 원본 JSON에서 자동으로 표시합니다. 공개 본문의 AI 표는 판정과 검사 결과만 사용합니다.
+
 다음은 **Harness 루트**에서 실행하는 예입니다. `runs/task/review.json`은 작성 완료된 매니페스트이며, 출력 폴더는 아직 없어야 합니다.
 
 ```bash
@@ -62,7 +74,7 @@ test -f publication.local.json || install -m 600 publication.example.json public
 | `includeDifferences` | 표본의 원값·정규화 후 차이를 공개. 기본값 `false` |
 | `includeStatistics` | 비교 필드 전체가 승인된 시나리오의 행 수 등의 자동 통계를 공개. 기본값 `false` |
 
-CPU, 메모리, TPS, 오류·예외와 호출 수, 응답시간 및 집계 중 빌더가 지원하는 필드만 설정할 수 있습니다. 같은 프로젝트·지표의 승인 범위는 이후 실행에도 적용됩니다. 별도 설정을 쓰려면 `node review.js build MANIFEST OUTPUT --publication-policy FILE`을 사용합니다. 과거 `publishSamples`, `publishCounts`는 공개를 허가하지 않습니다.
+CPU, 메모리, TPS, 오류·예외와 호출 수, 응답시간 및 집계 중 빌더가 지원하는 필드만 설정할 수 있습니다. 같은 프로젝트·지표의 승인 범위는 이후 실행에도 적용됩니다. 별도 설정을 쓰려면 `node review.js build MANIFEST OUTPUT --publication-policy FILE`을 사용합니다. 별도 체크아웃에는 정책 파일이 자동 복사되지 않습니다. 해당 PR의 승인 범위를 확인할 수 없으면 매니페스트에 `publicationAuthorization: "unconfirmed"`를 기록합니다. 공개 본문은 승인 정책 적용·기본 비공개·승인 미확인을 구분합니다. 명시한 파일에 접근할 수 없거나 내용이 유효하지 않으면 생성을 중단합니다. 과거 `publishSamples`, `publishCounts`는 공개를 허가하지 않습니다.
 
 공개 표는 조회 시작 기준 상대 위치와 일관된 가명을 사용합니다. 실패 사례에는 보호 대상 문자열이 없는 오류 안내와 공개 가능한 독립 HTTP 대조 표본을 사용합니다. 승인되지 않은 수치, 인증정보, 원본 UTC 시각, IP, 호스트명, 프로젝트·트랜잭션 식별자와 전체 응답은 공개하지 않습니다. 설정 및 실행 디렉터리는 Git에서 제외합니다.
 

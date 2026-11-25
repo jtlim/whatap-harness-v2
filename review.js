@@ -26,18 +26,30 @@ try {
   for (const entry of manifest.attachments ?? []) {
     const data = await readFile(resolve(root, entry.path));
     if (!entry.label || !data.length) throw Error('REVIEW_ATTACHMENT_EMPTY');
-    attachments.push({ label: entry.label, role: entry.role, path: entry.path, localHref: localHref(entry.path), sha256: digest(data) });
+    attachments.push({ content: data.toString('utf8'), label: entry.label, role: entry.role, path: entry.path, localHref: localHref(entry.path), sha256: digest(data) });
   }
-  if (!attachments.some(a => a.role === 'test' || a.role === 'reproduction'))
+  if (manifest.kind !== 'audit' && (manifest.outcome ?? 'VERIFIED') === 'VERIFIED' && !attachments.some(a => a.role === 'test' || a.role === 'reproduction'))
     throw Error('REVIEW_TEST_OR_REPRODUCTION_ATTACHMENT_REQUIRED');
   const defaultPolicyPath = fileURLToPath(new URL('./publication.local.json', import.meta.url));
   let publicationPolicy;
-  try {
-    publicationPolicy = JSON.parse(await readFile(policyPath ?? defaultPolicyPath, 'utf8'));
-  } catch (error) {
-    if (policyPath || error.code !== 'ENOENT') throw error;
+  let publicationState = manifest.publicationAuthorization === 'unconfirmed'
+    ? 'AUTHORIZATION_UNCONFIRMED' : 'DEFAULT_PRIVATE';
+  if (policyPath && publicationState === 'AUTHORIZATION_UNCONFIRMED')
+    throw Error('PUBLICATION_AUTHORIZATION_UNCONFIRMED');
+  if (publicationState !== 'AUTHORIZATION_UNCONFIRMED') {
+    let policyText;
+    try {
+      policyText = await readFile(policyPath ?? defaultPolicyPath, 'utf8');
+    } catch (error) {
+      if (policyPath || error.code !== 'ENOENT') throw Error('PUBLICATION_POLICY_UNREADABLE');
+    }
+    if (policyText !== undefined) {
+      try { publicationPolicy = JSON.parse(policyText); }
+      catch { throw Error('INVALID_PUBLICATION_POLICY'); }
+      publicationState = 'APPROVED_POLICY';
+    }
   }
-  const result = buildReview(manifest, runs, attachments, publicationPolicy);
+  const result = buildReview(manifest, runs, attachments, publicationPolicy, publicationState);
   const tokens = ['WHATAP_API_TOKEN', 'WHATAP_HTTP_API_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'OPENAI_API_KEY']
     .map(k => process.env[k]).filter(Boolean);
   if (tokens.some(t => result.body.includes(t)) ||
