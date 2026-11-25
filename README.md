@@ -39,7 +39,7 @@ codex --sandbox workspace-write --ask-for-approval on-request
 
 Codex에 다음과 같이 요청할 수 있습니다.
 
-> 원본 MCP 전체를 검수하고, 재현되는 문제가 있으면 수정·재검증해서 내 Fork에 PR로 제출해 줘.
+> MCP 전체 기능을 검수해 줘.
 
 > APM 트랜잭션과 TPS의 데이터 정확성을 독립 HTTP 결과와 비교해 줘.
 
@@ -49,9 +49,9 @@ Codex에 다음과 같이 요청할 수 있습니다.
 
 ## 제출 검토
 
-[대표 성공 사례와 실패 기록](docs/execution.md#대표-제출-사례)에서 평가용 MCP PR, 실행 ID, 전후 판정, 테스트와 검증 한계를 확인할 수 있습니다. 제출 브랜치는 `submission`입니다.
+[최종 통합 사례와 이전 검수 기록](docs/execution.md#최종-통합-제출-사례)에서 평가용 MCP PR, 실행 ID, 전후 판정, 테스트와 검증 한계를 확인할 수 있습니다. 제출 브랜치는 `submission`입니다.
 
-[서버 CPU AI 답변 검증](docs/usage.md#서버-cpu-ai-답변-검증)은 MCP 데이터 비교와 별도로 실행할 수 있습니다.
+전체 검수에는 등록된 MCP 실데이터 시나리오 9개와 [서버 CPU AI 답변의 독립 검증](docs/usage.md#서버-cpu-ai-답변-검증)이 포함됩니다. AI 답변 검증은 별도로 실행할 수도 있습니다.
 
 ## 상세 문서
 

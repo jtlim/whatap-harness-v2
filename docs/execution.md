@@ -1,6 +1,21 @@
 # 검증 실행 기록
 
-## 대표 제출 사례
+## 최종 통합 제출 사례
+
+[공개 MCP PR #9](https://github.com/jtlim/whatap-open-mcp/pull/9)는 최신 `submission`을 새 환경에 복제해 기준·후보 MCP와 실제 Codex 답변을 함께 검증한 사례입니다. 승인된 비식별 비교표와 MCP·AI 답변의 개별 판정이 PR 본문에 있습니다.
+
+| 근거 | 결과 |
+| --- | --- |
+| Harness | `9ef17963e5128710651a8cc2ea428004fb98b849`, 회귀 테스트 38개 통과 |
+| 기준 MCP | `c1001155538114e811e8ecf311904723aa131115`, 실행 `2026-11-25T12-20-52-177Z-PLoZS7`, 6/9 통과 및 단위·회귀 테스트 147개 통과 |
+| 후보 MCP | `89427a9533cc87aa2a15f60880c5c2a0c4aef4ad`, 실행 `2026-11-25T12-23-13-742Z-BGkWbX`, 9/9 통과 및 단위·회귀 테스트 154개 통과 |
+| 실제 AI 답변 | `ai-cpu-7tzZy0`, MCP PASS 및 AI 답변 PASS. 조회 조건, 표본 수, 평균·최대 CPU가 독립 HTTP 대조를 통과 |
+
+기준은 서버·트랜잭션·예외 고정 구간 3건을 거부했습니다. 이 실행의 기준 상대 시계열은 통과했습니다. 후보는 같은 고정 구간을 통과했고, 별도 합성 stdio 실험에서 MXQL과 직접 PromQL의 밀리초 경계 보존을 확인했습니다. 실제 CPU 답변은 현재 Codex가 MCP 행만 보고 생성했으며, 답변 저장 이후 독립 HTTP를 조회했습니다. 자유 형식 답변과 PromQL 실서비스 값은 범위 밖입니다.
+
+통합 상세 보고서는 실행 환경의 `runs/setup/review-final/report.md`에 있습니다. AI 답변과 비교 원본은 `runs/ai-cpu-7tzZy0/report.md`와 `report.json`을 확인합니다. 새 환경에서는 [전체 검수와 후보 제출 순서](usage.md#후보-확정과-제출-순서)를 따릅니다.
+
+## 대표 시계열 경계 불일치 사례
 
 [공개 MCP PR #8](https://github.com/jtlim/whatap-open-mcp/pull/8)에서 변경 코드, 비식별 전후 표본, 독립 HTTP 대조 통계와 기술적 반영 근거를 확인할 수 있습니다. Codex가 새 환경에서 현재 요청을 분석하고 수정 후보를 만들었습니다. Harness는 실제 MCP stdio 응답과 독립 HTTP 응답을 비교해 판정했습니다. PR은 사람이 검토하고 반영 여부를 결정하도록 열어 두었습니다.
 
@@ -19,7 +34,7 @@
 
 PR에서 보호된 프로젝트·행 식별자와 조회 UTC 시각 대신 가명과 상대 위치를 사용한 표본을 확인할 수 있습니다. 권한이 있는 실행 환경에서는 `runs/<실행 ID>/report.json`, `report.md`와 `runs/setup/review-final/report.md`, `evidence.json`을 확인할 수 있습니다. 원본과 로컬 빌드·테스트 로그는 저장소에 포함되지 않습니다. 새 환경에서 같은 종류의 근거가 필요하면 [설치 및 환경 구성](installation.md)과 [직접 검증](usage.md#직접-검증)을 따릅니다.
 
-## 서버 CPU AI 답변 검증 사례
+## 별도 서버 CPU AI 답변 초기 검증 사례
 
 실행 `ai-cpu-BbopqF`에서 현재 Codex 세션이 실제 MCP의 선택 서버 CPU 행을 읽고 최종 JSON 답변을 작성했습니다. 답변을 저장한 후 Harness가 독립 HTTP를 처음 조회했습니다. MCP 데이터 비교와 AI 답변 비교가 각각 PASS였고, 요청 조건·표본 수·평균·최대가 비교 기준을 충족했습니다. 사용한 MCP는 [PR #8](https://github.com/jtlim/whatap-open-mcp/pull/8)의 검증된 빌드입니다.
 
@@ -63,7 +78,7 @@ Codex는 기존 상대 파서를 유지하고 데이터 조회 도구에 한정�
 | --- | --- |
 | 통제된 AI 실행 실패 | 프로세스 종료 코드 17을 `AI_FAILED`로 기록. 실행 `2026-11-24T18-33-45-741Z-qY64iE` 및 [비식별 예제](examples/controlled-failure.json) |
 | 실제 Codex 초기화 실패 | 당시 파일 시스템이 읽기 전용이어서 시작하지 못함. [비식별 예제](examples/agent-start-failure.json) |
-| 실데이터 검증 실패 | 대표 사례의 기준 실행은 기간 거부 및 시계열 키 불일치를 `VALIDATION_FAILED`로 기록했습니다. 실패한 기준과 통과 후보의 차이 및 제출된 후보 SHA는 [MCP PR #8](https://github.com/jtlim/whatap-open-mcp/pull/8)에서 확인할 수 있습니다. |
+| 실데이터 검증 실패 | PR #8의 기준 실행은 기간 거부 및 시계열 키 불일치를 `VALIDATION_FAILED`로 기록했습니다. 실패한 기준과 통과 후보의 차이 및 제출된 후보 SHA는 [MCP PR #8](https://github.com/jtlim/whatap-open-mcp/pull/8)에서 확인할 수 있습니다. |
 | 검증 불가 | 토큰 미주입을 기록한 실행은 사전 점검에서 멈췄습니다. [비식별 실행 기록](examples/full-preflight-blocked.json). 기준 행의 5초 격자가 불완전한 경우에는 [통제 회귀 테스트](../test/probe.test.js)에서 `UNVERIFIABLE` 판정을 검사합니다. |
 | 인증 및 네트워크 환경 | 초기 실행의 토큰 미주입, 셸 DNS 오류를 보존. 환경 복구 후 수행된 실데이터 실행과 구분합니다. [비식별 예제](examples/full-preflight-blocked.json) |
 
