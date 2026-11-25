@@ -234,3 +234,50 @@ test('the default suite has one relative query per dataset and keeps statistics 
   assert.equal(feature.filter(s => s.fixed).length, 3);
   assert.equal(feature.filter(s => s.negative && s.invalidTimeRange).length, 3);
 });
+
+test('display count enforces the request limit independently of summary, values and HTTP', async () => {
+  const rows = [{ ...reference[0], tps: '1.23' }, reference[1]];
+  const api = { mxql: async () => http(reference) };
+  for (const limit of [2, 3]) {
+    assert.equal((await probe(tool(texts(rows)), api, { ...series, limit })).status, 'PASS');
+  }
+  for (const scenario of [
+    { ...series, limit: 1 },
+    { ...series, domain: 'apm', statisticsMode: 'transaction', groupKeys: ['_id_'], limit: 1 },
+  ]) {
+    for (const data of [rows, [rows[0], { ...rows[1], tps: 999 }]]) {
+      const result = await probe(tool(texts(data)), api, scenario);
+      assert.equal(result.status, 'FAIL');
+      assert.equal(result.reason, 'MCP_DISPLAY_LIMIT_EXCEEDED');
+      assert.match(result.checks.find(c => c.code === 'MCP_DISPLAY_LIMIT').detail, /요청 한도 1행, MCP 표시 2행/);
+    }
+  }
+  const malformedReference = { mxql: () => { throw Error('no reference'); } };
+  const overlapping = texts([rows[1], { ...rows[0], time: end }]).replaceAll('.000 UTC', ' UTC');
+  assert.equal((await probe(tool(overlapping), malformedReference, { ...series, limit: 1 }, () => end + 80)).reason,
+    'MCP_DISPLAY_LIMIT_EXCEEDED');
+
+  const apm = { ...series, statisticsMode: 'transaction', groupKeys: ['_id_'], limit: 1 };
+  const sample = await probe(tool(texts(rows.slice(0, 1)) + '\nResult may be truncated'), api, apm);
+  assert.equal(sample.reason, 'DISCLOSED_SAMPLE_MATCH');
+  assert.match(sample.checks.find(c => c.code === 'MCP_DISPLAY_LIMIT').detail, /MCP 표시 1행/);
+  assert.ok(sample.checks.some(c => c.code === 'APM_GROUP_AGGREGATES' && c.ok));
+});
+
+test('candidate keys are checked even when HTTP fails or APM would filter the reference', async () => {
+  const good = [{ ...reference[0], tps: '1.23' }, reference[1]];
+  const failed = { mxql: () => { throw Error('no reference'); } };
+  const duplicate = await probe(tool(texts([good[0], good[0]])), failed, series);
+  assert.equal(duplicate.reason, 'MCP_RECORD_IDENTITIES_INVALID');
+  assert.match(duplicate.checks.at(-1).detail, /API 확인 불가; MCP 중복=1/);
+  const blankKey = await probe(tool(texts([{ ...good[0], _id_: '' }, good[1]])), failed, series);
+  assert.equal(blankKey.reason, 'MCP_RECORD_IDENTITIES_INVALID');
+  assert.match(blankKey.checks.at(-1).detail, /MCP 중복=0, 식별자 누락=1/);
+
+  const apm = { ...series, statisticsMode: 'transaction', groupKeys: ['_id_'], limit: 1 };
+  const invalid = await probe(tool(texts(good.slice(0, 1)) + '\nResult may be truncated'),
+    { mxql: async () => http([...reference, reference[1]]) }, apm);
+  assert.equal(invalid.status, 'UNVERIFIABLE');
+  assert.equal(invalid.reason, 'AMBIGUOUS_RECORD_IDENTITIES');
+  assert.match(invalid.checks.at(-1).detail, /API 중복=1/);
+});

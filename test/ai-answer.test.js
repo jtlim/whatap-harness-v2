@@ -127,3 +127,11 @@ test('only a matching interior with exchanged edge rows establishes a precision 
   assert.equal(defective.mcp.reason, 'FIELD_MISMATCH');
   assert.equal(defective.mcp.status, 'FAIL');
 });
+
+test('CPU answer processing retains a verified MCP key defect without an HTTP reference', async () => {
+  const input = capture([...rows.slice(0, -1), rows[0]]);
+  const { mcp, ai } = await check(answer, input, { ok: true, status: 200, body: [] });
+  assert.equal(mcp.status, 'FAIL');
+  assert.equal(mcp.reason, 'MCP_RECORD_IDENTITIES_INVALID');
+  assert.equal(ai.status, 'UNVERIFIABLE');
+});
