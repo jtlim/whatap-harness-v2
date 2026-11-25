@@ -117,7 +117,7 @@ export WHATAP_API_TOKEN WHATAP_HTTP_API_TOKEN
 
 검증 프로세스가 두 환경변수를 받는 곳에서 실행해야 합니다. `verify.js`는 독립 HTTP를 직접 호출하고 빌드된 MCP를 stdio로 실행합니다. 외부 MCP 등록이나 이전 사용자의 Codex 설정 파일은 필요하지 않습니다. GitHub CLI와 Codex에는 각자의 로그인 세션이 필요합니다.
 
-데모 수치의 공개가 승인된 경우에만 `publication.example.json`을 `publication.local.json`으로 복사하고 승인 참조, 프로젝트, 지표 범위를 입력합니다. 최초 생성은 `install -m 600 publication.example.json publication.local.json`으로 할 수 있습니다. 승인 또는 제공자 허용 범위가 확인되지 않으면 이 파일 없이 시작합니다. [세부 공개 정책](reporting.md#데이터-공개-설정)
+기본 설정에서는 실제 측정값과 상세 비교 통계가 PR에서 제외됩니다. 공개가 승인된 경우에만 선택 설정으로 `publication.example.json`을 `publication.local.json`으로 복사하고 승인 참조, 프로젝트, 지표 범위를 입력합니다. 최초 생성은 `install -m 600 publication.example.json publication.local.json`으로 할 수 있습니다. 승인 또는 제공자 허용 범위가 확인되지 않으면 이 파일 없이 시작합니다. [세부 공개 정책](reporting.md#데이터-공개-설정)
 
 ## 5. 설치 확인과 최초 실행
 
