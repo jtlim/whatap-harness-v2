@@ -70,14 +70,17 @@ MCP 변경은 [후보 확정과 제출 순서](usage.md#후보-확정과-제출-
 
 Codex는 변경한 저장소별로 실제 원격과 기준 SHA, 현재 GitHub 계정과 쓰기 권한을 확인한 뒤 별도의 작업 브랜치에 커밋합니다. MCP의 제출 대상은 `config.local.json`의 본인 Fork입니다. Harness의 제출 대상은 권한 있는 Harness 원격입니다. 한 저장소만 변경했다면 그 저장소의 PR만 만듭니다. 두 저장소에 변경이 있으면 PR을 상호 참조하고 MCP PR에 실제 검증한 Harness SHA를 명시합니다.
 
-검토용 브랜치를 Push한 뒤 **Harness 루트**에서 실행하는 예입니다. 아래의 변수에는 위에서 이미 확인한 제출 대상과 브랜치를 지정합니다.
+검토용 브랜치를 Push한 뒤 **Harness 루트**에서 실행하는 예입니다. 아래 프롬프트에는 설치 시 확인한 MCP Fork의 `OWNER/REPO`와 기준 브랜치, 이미 Push한 작업 브랜치를 입력합니다.
 
 ```bash
+read -r -p 'MCP Fork (OWNER/REPO): ' MCP_FORK
+read -r -p 'MCP Fork의 PR 기준 브랜치: ' BASE_BRANCH
+read -r -p 'Push한 MCP 작업 브랜치: ' HEAD_BRANCH
 gh pr create --repo "$MCP_FORK" --base "$BASE_BRANCH" --head "$HEAD_BRANCH" \
   --title "변경 요약" --body-file runs/task/published-review/pr-body.md
 ```
 
-기존 PR의 본문 갱신에는 `gh pr edit "$PR_NUMBER" --repo "$MCP_FORK" --body-file runs/task/published-review/pr-body.md`를 사용할 수 있습니다. 제목, 코드 차이, 검증 실패와 한계, 공개된 비교 표본을 확인한 뒤 사용자가 GitHub에서 최종 Merge합니다. 객관적 근거가 없으면 그 이유를 보고합니다.
+`PR_NUMBER`에 갱신할 PR 번호를 먼저 지정한 뒤, 기존 PR의 본문 갱신에는 `gh pr edit "$PR_NUMBER" --repo "$MCP_FORK" --body-file runs/task/published-review/pr-body.md`를 사용할 수 있습니다. 제목, 코드 차이, 검증 실패와 한계, 공개된 비교 표본을 확인한 뒤 사용자가 GitHub에서 최종 Merge합니다. 객관적 근거가 없으면 그 이유를 보고합니다.
 
 ## 기존 근거로 재생성
 

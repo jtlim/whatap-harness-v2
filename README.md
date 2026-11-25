@@ -1,6 +1,6 @@
 # WhaTap AI Agent Harness v2
 
-Codex가 WhaTap MCP를 검수하고 필요한 수정만 GitHub PR로 제출하는 과제 프로젝트입니다. Harness는 MCP가 출력한 데이터를 별도 HTTP Client의 결과와 비교해 판정과 재현 근거를 남깁니다. 사용자는 PR에서 변경 이유와 검증에 사용한 데이터를 확인한 뒤 Merge를 결정합니다.
+WhaTap AI Agent Harness는 WhaTap MCP를 실행하고, 도구가 반환하는 기간·행·수치·집계를 독립 WhaTap HTTP API 응답과 비교합니다. Codex와 함께 사용하면 문제의 원인을 분석하고, 수정 후보를 재검증해 GitHub 검토용 PR을 만들 수 있습니다.
 
 ## 주요 기능
 
@@ -27,31 +27,27 @@ flowchart LR
 
 ## Quick Start
 
-**사용자 준비.** Linux에서 Bash, Git, Node.js 22와 npm, GitHub CLI, Codex CLI를 준비합니다. 본인의 MCP Fork와 읽기 전용 WhaTap 데모 권한이 필요합니다. 처음 설치하는 경우 [설치 가이드](docs/installation.md)에 따라 Clone, 인증, 기준 브랜치와 데모 설정을 완료하세요.
+1. [설치 가이드](docs/installation.md)에서 Ubuntu 도구를 준비하고 Harness를 Clone합니다. Harness 실행에는 Bash, Git, Node.js 22 계열(최신 패치 권장)이 필요합니다. MCP 빌드에는 npm, Codex 작업에는 Codex CLI와 Linux 샌드박스, Fork 및 PR 작업에는 GitHub CLI와 해당 저장소 권한이 필요합니다.
+2. **Harness 루트**에서 서비스 자격 증명 없이 설치 상태를 확인합니다.
 
-**Harness 저장소 루트에서 확인하고 시작합니다.**
+   ```bash
+   npm test
+   node verify.js --list
+   ```
 
-```bash
-npm test
-node verify.js --list
-codex --sandbox workspace-write --ask-for-approval on-request
-```
+3. 실제 검수에는 빌드한 MCP, 승인된 Server·APM 프로젝트와 두 읽기 전용 토큰이 필요합니다. [직접 검증](docs/usage.md#직접-검증)으로 시나리오를 실행하거나, 같은 루트에서 `codex --sandbox workspace-write --ask-for-approval on-request`를 열어 요청합니다.
 
-Codex에 다음과 같이 요청할 수 있습니다.
+   > APM 트랜잭션과 TPS를 독립 HTTP 결과와 비교하고, 변경 없이 결과만 알려 줘.
 
-> MCP 전체 기능을 검수해 줘.
+   > MCP 전체 기능을 검수하고 재현된 결함의 수정안을 내 Fork에 검토용 PR로 만들어 줘.
 
-> APM 트랜잭션과 TPS의 데이터 정확성을 독립 HTTP 결과와 비교해 줘.
+4. 실행 출력에 표시된 `runs/<실행 ID>/report.md`에서 판정과 실패 사유를, `report.json`에서 로컬 원본 근거를 확인합니다. GitHub PR을 만들 경우 생성한 PR 본문에서 변경 이유와 승인된 비교표를 검토합니다.
 
-**Codex가 수행하는 작업.** 승인된 작업 범위에서 기준과 후보의 빌드·테스트, MCP와 HTTP 조회, 원인 분석, 변경 및 보고서 생성을 진행합니다. 변경할 문제가 확인되면 대상 저장소의 작업 브랜치로 검토용 PR을 제출합니다.
+## 실행 예시와 지원 범위
 
-**사용자가 확인하는 결과.** GitHub PR의 변경별 반영 근거, 검증 전후 판정과 승인된 비교표를 확인합니다. 로컬 상세 보고서와 JSON은 실행 출력에 나온 경로에서 열 수 있습니다. 최종 Merge는 사용자가 수행합니다.
+[MCP PR #9](https://github.com/jtlim/whatap-open-mcp/pull/9)에서 검증 전후 판정, 변경 이유, 비교 근거와 재현 절차가 포함된 실제 PR을 볼 수 있습니다. 이 PR의 판정은 해당 커밋과 조회 조건에서 얻은 결과입니다. [실행 예시와 실패 기록](docs/execution.md)
 
-## 제출 검토
-
-제출 대상은 [`jtlim/whatap-harness-v2`의 `submission`](https://github.com/jtlim/whatap-harness-v2/tree/submission)입니다. [MCP Fork](https://github.com/jtlim/whatap-open-mcp)의 [PR #9](https://github.com/jtlim/whatap-open-mcp/pull/9)가 대표 실행 사례입니다. 신규 환경에서 기준 MCP는 6/9, 후보는 9/9 통과했고 실제 구조화 AI 답변도 독립 대조를 통과했습니다. [실행 SHA와 테스트 결과](docs/execution.md#최종-통합-제출-사례) · [실패 처리 근거](docs/execution.md#실패-처리-근거)
-
-전체 검수에는 등록된 MCP 실데이터 시나리오 9개와 [서버 CPU AI 답변의 독립 검증](docs/usage.md#서버-cpu-ai-답변-검증)이 포함됩니다. AI 답변 검증은 별도로 실행할 수도 있습니다.
+전체 검수는 등록된 MCP 시나리오 9개와 정해진 서버 CPU 질문의 구조화 AI 답변 검증을 포함합니다. 등록되지 않은 MCP 도구와 자유 형식 AI 답변은 별도 검증이 필요하며, 데이터 완전성과 권한에 따라 일부 결과는 검증 불가로 남을 수 있습니다.
 
 ## 상세 문서
 
@@ -61,7 +57,5 @@ Codex에 다음과 같이 요청할 수 있습니다.
 | [사용 가이드](docs/usage.md) | 요청 예제, 직접 검증, 실패 대응, PR 검토 |
 | [아키텍처와 검증 정책](docs/architecture.md) | 구조, 판정, 보안, 설계의 한계 |
 | [보고서와 PR 제출](docs/reporting.md) | 산출물, 매니페스트, 공개 정책, 증거 재생성 |
-| [실제 실행 기록](docs/execution.md) | PR #9의 실행 근거와 실패 처리 사례 |
+| [실행 예시와 실패 기록](docs/execution.md) | PR 결과물 읽는 방법과 실패 처리 예제 |
 | [Agent 작업 지침](AGENTS.md) | 저장소를 열었을 때 Codex가 따르는 작업 규칙 |
-
-실데이터 검증에는 승인된 데모 접근과 네트워크가 필요합니다. 도구가 보여 주는 데이터와 요약을 검증하며, 자유 형식 AI 응답의 정확성이나 등록 시나리오 밖의 MCP 기능은 별도 검증이 필요합니다.
