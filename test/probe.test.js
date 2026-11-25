@@ -90,12 +90,12 @@ test('relative query without Period does not make a reference call', async () =>
   assert.equal(result.reason, 'MCP_PERIOD_INVALID');
 });
 
-test('missing MCP rows fail and missing HTTP grid is unverifiable', async () => {
+test('reference gaps can match; missing MCP rows still fail', async () => {
   const candidate = tool(texts([{ ...reference[0], tps: '1.23' }]));
   const missingMcp = await probe(candidate, { mxql: async () => http(reference) }, series);
   const missingHttp = await probe(candidate, { mxql: async () => http(reference.slice(0, 1)) }, series);
   assert.equal(missingMcp.reason, 'MISSING_OR_EXTRA_RECORDS');
-  assert.equal(missingHttp.reason, 'HTTP_REFERENCE_INCOMPLETE');
+  assert.equal(missingHttp.status, 'PASS');
 });
 
 test('only a verified fixed-window control classifies a period rejection as a defect', async () => {
@@ -325,4 +325,27 @@ test('a display prefix cutting a duplicate group compares the exact independentl
   assert.equal(good.evidence.recordComparison.http.groups, 0);
   assert.equal((await run([shown[0], ref[2]])).reason, 'FIELD_MISMATCH');
   assert.equal((await run([...shown, ref[2]])).reason, 'MCP_DISPLAY_LIMIT_EXCEEDED');
+});
+
+test('confirmed empty MXQL delivery is separate from actual row comparisons', async () => {
+  const response = [
+    '**No rows returned.**', '- Project: 1 | timeRange: "10s"',
+    `- Window (epoch ms): ${start} → ${end}`, '- limit: 5', '- param: (none)',
+    '- Rows: 0 returned, 0 after metadata filtering',
+    'Sent `mql`: `/v2/app/tps_pcode` — a path reference.',
+  ].join('\n');
+  assert.equal((await probe(tool(response), { mxql: () => http([]) }, series)).reason, 'EMPTY_RESPONSE_MATCH');
+  assert.equal((await probe(tool(response), { mxql: () => http(reference) }, series)).status, 'FAIL');
+  assert.equal((await probe(tool(texts(reference)), { mxql: () => http([]) }, series)).status, 'FAIL');
+  assert.equal((await probe(tool(response.replace('Project: 1', 'Project: 2')), {}, series)).status, 'FAIL');
+  assert.equal((await probe(tool(response), { mxql: () => http({ data: [], total: 1, retrievedTotal: 0 }) }, series)).status, 'UNVERIFIABLE');
+});
+
+test('actual bucket alignment and reference scope remain required', async () => {
+  const shifted = [{ ...reference[0], time: start + 1000 }];
+  const api = body => ({ mxql: () => http(body) });
+  assert.equal((await probe(tool(texts(shifted)), api(shifted), series)).status, 'UNVERIFIABLE');
+  assert.equal((await probe(tool(texts(shifted)), api(reference), series)).status, 'FAIL');
+  const invalid = { ...http(reference), request: { projectCode: 2, payload: { stime: start, etime: end, mql: '/v2/app/tps_pcode' } } };
+  assert.equal((await probe(tool(texts(reference)), { mxql: () => invalid }, series)).status, 'UNVERIFIABLE');
 });

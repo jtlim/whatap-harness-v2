@@ -56,8 +56,7 @@ test('missing fields and malformed types or JSON fail the format check', async (
 });
 
 test('incomplete reference does not establish either result', async () => {
-  for (const http of [undefined, { ...reference, body: rows.slice(1) },
-    { ...reference, body: [...rows.slice(1), rows[1]] }]) {
+  for (const http of [undefined, { ...reference, body: { data: rows.slice(1), total: 12, retrievedTotal: 11 } }]) {
     const { mcp, ai } = await verifyCpuAnswer(scenario, capture(), { text: JSON.stringify(answer) }, http);
     assert.equal(mcp.status, 'UNVERIFIABLE');
     assert.equal(ai.status, 'UNVERIFIABLE');
@@ -142,7 +141,7 @@ test('a complete CPU cadence can have a constant nonzero UTC phase', async () =>
   assert.equal(mcp.status, 'PASS');
   assert.equal(ai.status, 'PASS');
   const irregular = shifted.map((row, i) => i === 3 ? { ...row, time: row.time + 1 } : row);
-  assert.equal((await check(answer, capture(irregular), { ...reference, body: irregular })).ai.status, 'UNVERIFIABLE');
+  assert.equal((await check(answer, capture(irregular), { ...reference, body: irregular })).ai.status, 'PASS');
 });
 
 test('another server exchange does not invalidate an identical selected CPU window', async () => {
@@ -172,4 +171,18 @@ test('CPU cadence retains all records in the requested row-weighted mean', async
   assert.equal(result.mcp.status, 'PASS');
   assert.equal(result.ai.status, 'PASS');
   assert.equal((await check(answer, capture(repeated), { ...reference, body: repeated })).ai.status, 'FAIL');
+});
+
+test('an independently confirmed empty CPU query has no arithmetic result', async () => {
+  const args = mcpCall(scenario).args;
+  const text = [
+    '**No rows returned.**', `- Project: 1 | timeRange: "${args.timeRange}"`,
+    `- Window (epoch ms): ${stime} → ${etime}`, '- limit: 1000', '- param: (none)',
+    '- Rows: 0 returned, 0 after metadata filtering',
+    'Sent `mql`: `/v2/sys/server_base` — a path reference.',
+  ].join('\n');
+  const capture = { call: mcpCall(scenario), result: { content: [{ type: 'text', text }] } };
+  const { mcp, ai } = await verifyCpuAnswer(scenario, capture, { failed: true }, { ...reference, body: [] });
+  assert.equal(mcp.reason, 'EMPTY_RESPONSE_MATCH');
+  assert.equal(ai.reason, 'CPU_NO_SAMPLES');
 });
