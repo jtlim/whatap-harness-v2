@@ -268,18 +268,17 @@ test('candidate keys are checked even when HTTP fails or APM would filter the re
   const good = [{ ...reference[0], tps: '1.23' }, reference[1]];
   const failed = { mxql: () => { throw Error('no reference'); } };
   const duplicate = await probe(tool(texts([good[0], good[0]])), failed, series);
-  assert.equal(duplicate.reason, 'MCP_RECORD_IDENTITIES_INVALID');
-  assert.match(duplicate.checks.at(-1).detail, /API 확인 불가; MCP 중복=1/);
+  assert.equal(duplicate.status, 'UNVERIFIABLE');
+  assert.equal(duplicate.evidence.recordKeys.mcp.additionalRows, 1);
   const blankKey = await probe(tool(texts([{ ...good[0], _id_: '' }, good[1]])), failed, series);
   assert.equal(blankKey.reason, 'MCP_RECORD_IDENTITIES_INVALID');
-  assert.match(blankKey.checks.at(-1).detail, /MCP 중복=0, 식별자 누락=1/);
+  assert.match(blankKey.checks.at(-1).detail, /MCP 식별자 누락=1/);
 
   const apm = { ...series, statisticsMode: 'transaction', groupKeys: ['_id_'], limit: 1 };
   const invalid = await probe(tool(texts(good.slice(0, 1)) + '\nResult may be truncated'),
     { mxql: async () => http([...reference, reference[1]]) }, apm);
-  assert.equal(invalid.status, 'UNVERIFIABLE');
-  assert.equal(invalid.reason, 'AMBIGUOUS_RECORD_IDENTITIES');
-  assert.match(invalid.checks.at(-1).detail, /API 중복=1/);
+  assert.equal(invalid.reason, 'DISCLOSED_SAMPLE_MATCH');
+  assert.equal(invalid.evidence.recordKeys.http.additionalRows, 1);
 });
 
 test('a bounded server display must match the independently selected prefix', async () => {
@@ -312,4 +311,18 @@ test('sparse edge exchange needs both timing and corroborated identities', async
   assert.equal((await run(known, shifted)).reason, 'MCP_PERIOD_PRECISION_LIMIT');
   assert.equal((await run({ ...known, _id_: 'new' }, shifted)).status, 'FAIL');
   assert.equal((await run(known, { ...shifted, startedAt: end })).status, 'FAIL');
+});
+
+test('a display prefix cutting a duplicate group compares the exact independently chosen rows', async () => {
+  const scenario = { ...series, domain: 'server', path: 'v2/sys/server_base',
+    expectedStepMs: undefined, limit: 2 };
+  const ref = [reference[0], { ...reference[1], tps: 7 }, { ...reference[1], tps: 8 }];
+  const shown = [{ ...ref[0], tps: '1.23' }, ref[1]];
+  const run = rows => probe(tool(texts(rows) + '\nResult may be truncated'), { mxql: async () => http(ref) }, scenario);
+  const good = await run(shown);
+  assert.equal(good.reason, 'DISCLOSED_SAMPLE_MATCH');
+  assert.equal(good.evidence.recordKeys.http.groups, 1);
+  assert.equal(good.evidence.recordComparison.http.groups, 0);
+  assert.equal((await run([shown[0], ref[2]])).reason, 'FIELD_MISMATCH');
+  assert.equal((await run([...shown, ref[2]])).reason, 'MCP_DISPLAY_LIMIT_EXCEEDED');
 });

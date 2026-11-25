@@ -14,17 +14,32 @@ test('composite identities allow repeated components and preserve numeric normal
   assert.equal(compareRows(scenario, good, [{ ...first, _id_: 1 }, second]).status, 'FAIL');
 });
 
-test('reference-only key ambiguity is unverifiable and candidate key defects fail', () => {
-  for (const [reference, candidate, status, reason, detail] of [
-    [good, duplicated, 'FAIL', 'MCP_RECORD_IDENTITIES_INVALID', /API 중복=0.*MCP 중복=1/],
-    [good, missing, 'FAIL', 'MCP_RECORD_IDENTITIES_INVALID', /MCP 중복=0, 식별자 누락=1/],
-    [duplicated, good, 'UNVERIFIABLE', 'AMBIGUOUS_RECORD_IDENTITIES', /API 중복=1/],
-    [missing, good, 'UNVERIFIABLE', 'AMBIGUOUS_RECORD_IDENTITIES', /API 중복=0, 식별자 누락=1/],
-    [missing, duplicated, 'FAIL', 'MCP_RECORD_IDENTITIES_INVALID', /API 중복=0, 식별자 누락=1.*MCP 중복=1/],
+test('missing keys are separate from repeated keys', () => {
+  assert.equal(compareRows(scenario, good, missing).reason, 'MCP_RECORD_IDENTITIES_INVALID');
+  assert.equal(compareRows(scenario, missing, good).status, 'UNVERIFIABLE');
+  assert.equal(compareRows(scenario, missing, missing).status, 'FAIL');
+  assert.equal(compareRows(scenario, good, duplicated).reason, 'MISSING_OR_EXTRA_RECORDS');
+});
+
+test('compare duplicate keys as unordered multisets with record counts', () => {
+  const group = values => values.map(cpu => ({ ...first, cpu }));
+  for (const [a, b, status] of [
+    [[10,20],[10,20],'PASS'], [[10,20],[20,10],'PASS'],
+    [[10,10],[10,10],'PASS'], [[10,20],[10],'FAIL'],
+    [[10,20],[10,10],'FAIL'], [[10,20],[10,20,20],'FAIL'],
+    [[10,20],[10,30],'FAIL'], [[10,10],[10],'FAIL'], [[10],[10,10],'FAIL'],
   ]) {
-    const result = compareRows(scenario, reference, candidate);
-    assert.equal(result.status, status);
-    assert.equal(result.reason, reason);
-    assert.match(result.checks[0].detail, detail);
+    const result = compareRows(scenario, group(a), group(b));
+    assert.equal(result.status,status);
   }
+  const result = compareRows(scenario, group([10,20]), group([20,10]));
+  assert.equal(result.comparison.sharedDuplicateKeys, 1);
+  assert.deepEqual(result.comparison.http, { groups: 1, rows: 2, additionalRows: 1, distinctMeasurements: 1, missingKeys: 0 });
+});
+
+test('tolerance matching searches alternatives without reusing a reference row', () => {
+  const group = values => values.map(cpu => ({ ...first, cpu }));
+  const s = { ...scenario, absoluteTolerance: 1 };
+  assert.equal(compareRows(s, group([0, 2]), group([1, 0])).status, 'PASS');
+  assert.equal(compareRows(s, group([0, 3]), group([1, 1])).status, 'FAIL');
 });

@@ -129,7 +129,7 @@ test('only a matching interior with exchanged edge rows establishes a precision 
 });
 
 test('CPU answer processing retains a verified MCP key defect without an HTTP reference', async () => {
-  const input = capture([...rows.slice(0, -1), rows[0]]);
+  const input = capture([...rows.slice(0, -1), { ...rows[0], _id_: '' }]);
   const { mcp, ai } = await check(answer, input, { ok: true, status: 200, body: [] });
   assert.equal(mcp.status, 'FAIL');
   assert.equal(mcp.reason, 'MCP_RECORD_IDENTITIES_INVALID');
@@ -162,4 +162,14 @@ test('another server exchange does not invalidate an identical selected CPU wind
   assert.equal(result.ai.status, 'PASS');
   const wrong = { text: JSON.stringify({ ...answer, averageCpu: 99 }) };
   assert.equal((await verifyCpuAnswer(relative, input, wrong, http)).ai.status, 'FAIL');
+});
+
+test('CPU cadence retains all records in the requested row-weighted mean', async () => {
+  const repeated = [...rows, { ...rows[0], cpu: 94 }];
+  const exact = repeated.reduce((sum, row) => sum + Number(row.cpu.toFixed(2)), 0) / repeated.length;
+  const expected = { ...answer, sampleCount: 13, averageCpu: Number(exact.toFixed(2)), maxCpu: 94 };
+  const result = await check(expected, capture(repeated), { ...reference, body: repeated });
+  assert.equal(result.mcp.status, 'PASS');
+  assert.equal(result.ai.status, 'PASS');
+  assert.equal((await check(answer, capture(repeated), { ...reference, body: repeated })).ai.status, 'FAIL');
 });
