@@ -42,7 +42,7 @@ gh api user --jq .login
 
 ## 2. MCP Fork와 Harness Clone
 
-브라우저에서 [WhaTap MCP 원본](https://github.com/whatap/whatap-open-mcp)을 본인 계정이나 권한 있는 조직으로 Fork합니다. 원본은 기준 소스를 가져오는 데 사용하고 PR의 대상은 사용자 Fork로 지정합니다. Harness는 과제 제출 링크에 있는 저장소를 Clone합니다. Harness도 수정해 PR을 만들 예정이면 작업 브랜치 쓰기 권한이 있는 Harness 저장소나 본인 Harness Fork를 선택합니다.
+브라우저에서 [WhaTap MCP 원본](https://github.com/whatap/whatap-open-mcp)을 본인 계정이나 권한 있는 조직으로 Fork합니다. 원본은 기준 소스를 가져오는 데 사용하고 PR의 대상은 사용자 Fork로 지정합니다. 과제 제출용 Harness는 [`jtlim/whatap-harness-v2`](https://github.com/jtlim/whatap-harness-v2)의 `submission`을 Clone합니다. Harness도 수정해 PR을 만들 예정이면 작업 브랜치 쓰기 권한이 있는 Harness 저장소나 본인 Harness Fork를 선택합니다.
 
 **새 작업을 둘 상위 디렉터리**에서 실행합니다. URL과 Fork 이름은 본인 환경 값으로 바꿉니다. 아래의 `MCP_FORK`와 `BASE_BRANCH`는 같은 셸에서 이후 단계에도 사용합니다.
 
@@ -99,7 +99,7 @@ test -f config.local.json || install -m 600 config.example.json config.local.jso
 
 | 계약 | 입력할 값 |
 | --- | --- |
-| `fork` | 실제 MCP Fork의 `OWNER/REPO`. 공식 Codex 제출 절차는 이 설정을 사용합니다. 레거시 진단은 저장소 이름이 `whatap-open-mcp`인 Fork를 기대합니다. |
+| `fork` | 실제 MCP Fork의 `OWNER/REPO`. 공식 Codex 제출 절차는 이 설정을 사용합니다. |
 | `baseBranch` | 위에서 확인한 MCP Fork의 PR 기준 브랜치 |
 | `serverProject`, `apmProject` | 승인된 데모 프로젝트의 양의 정수 코드. 예시의 1과 2를 교체합니다. |
 | `apiOrigin` (선택) | 승인된 데모 HTTPS Origin. 생략 시 `https://api.whatap.io` |
