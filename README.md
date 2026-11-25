@@ -49,7 +49,7 @@ Codex에 다음과 같이 요청할 수 있습니다.
 
 ## 제출 검토
 
-[최종 통합 사례와 이전 검수 기록](docs/execution.md#최종-통합-제출-사례)에서 평가용 MCP PR, 실행 ID, 전후 판정, 테스트와 검증 한계를 확인할 수 있습니다. 제출 브랜치는 `submission`입니다.
+제출 대상은 [`jtlim/whatap-harness-v2`의 `submission`](https://github.com/jtlim/whatap-harness-v2/tree/submission)입니다. [MCP Fork](https://github.com/jtlim/whatap-open-mcp)의 [PR #9](https://github.com/jtlim/whatap-open-mcp/pull/9)가 대표 실행 사례입니다. 신규 환경에서 기준 MCP는 6/9, 후보는 9/9 통과했고 실제 구조화 AI 답변도 독립 대조를 통과했습니다. [실행 SHA와 테스트 결과](docs/execution.md#최종-통합-제출-사례) · [실패 처리 근거](docs/execution.md#실패-처리-근거)
 
 전체 검수에는 등록된 MCP 실데이터 시나리오 9개와 [서버 CPU AI 답변의 독립 검증](docs/usage.md#서버-cpu-ai-답변-검증)이 포함됩니다. AI 답변 검증은 별도로 실행할 수도 있습니다.
 
@@ -61,7 +61,7 @@ Codex에 다음과 같이 요청할 수 있습니다.
 | [사용 가이드](docs/usage.md) | 요청 예제, 직접 검증, 실패 대응, PR 검토 |
 | [아키텍처와 검증 정책](docs/architecture.md) | 구조, 판정, 보안, 설계의 한계 |
 | [보고서와 PR 제출](docs/reporting.md) | 산출물, 매니페스트, 공개 정책, 증거 재생성 |
-| [실제 실행 기록](docs/execution.md) | 성공·실패 사례, 커밋, PR, 보존된 실행 ID |
+| [실제 실행 기록](docs/execution.md) | PR #9의 실행 근거와 실패 처리 사례 |
 | [Agent 작업 지침](AGENTS.md) | 저장소를 열었을 때 Codex가 따르는 작업 규칙 |
 
 실데이터 검증에는 승인된 데모 접근과 네트워크가 필요합니다. 도구가 보여 주는 데이터와 요약을 검증하며, 자유 형식 AI 응답의 정확성이나 등록 시나리오 밖의 MCP 기능은 별도 검증이 필요합니다.

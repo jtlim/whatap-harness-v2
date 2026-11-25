@@ -77,7 +77,7 @@ node verify.js --mcp runs/candidate --phase after --fixed-end "$fixed_end"
 
 ## 서버 CPU AI 답변 검증
 
-지정한 서버 한 대의 고정 UTC 1분, `cpu`(%), 표본 수·평균·최대에 대해 **Codex가 작성한 JSON 답변 자체**를 비교합니다. 전체 검수에서는 기존 9개 MCP 검증에 이어 이 절차를 수행합니다. 이 절차만 별도로 실행할 수도 있습니다. 이 시나리오에는 고정 UTC 구간을 지원하는 MCP 빌드가 필요합니다. [PR #8 후보](https://github.com/jtlim/whatap-open-mcp/pull/8)를 별도 체크아웃에서 사용할 수 있습니다. 서버 식별자는 해당 프로젝트의 권한 있는 MCP 서버 조회에서 골라 로컬로 전달합니다.
+지정한 서버 한 대의 고정 UTC 1분, `cpu`(%), 표본 수·평균·최대에 대해 **Codex가 작성한 JSON 답변 자체**를 비교합니다. 전체 검수에서는 기존 9개 MCP 검증에 이어 이 절차를 수행합니다. 이 절차만 별도로 실행할 수도 있습니다. 이 시나리오에는 고정 UTC 구간을 지원하는 MCP 빌드가 필요합니다. 최종 통합 사례를 재현할 때는 [PR #9의 후보 SHA](execution.md#최종-통합-제출-사례)를 별도 체크아웃에서 사용할 수 있습니다. 서버 식별자는 해당 프로젝트의 권한 있는 MCP 서버 조회에서 골라 로컬로 전달합니다.
 
 1. Harness 루트에서 조회 구간과 서버를 정하고 캡처합니다. 종료점은 과거 5초 경계의 Unix 밀리초입니다. 최근 수집 지연을 피하려면 예시처럼 최소 20분 이전의 5분 경계를 선택합니다.
 
@@ -97,15 +97,6 @@ node verify.js --mcp runs/candidate --phase after --fixed-end "$fixed_end"
 
 MCP 판정과 AI 판정은 분리됩니다. 누락·중복 등으로 독립 기준이 불완전하면 해당 수치 판단은 `UNVERIFIABLE`입니다. 잘못된 수치나 응답 형식은 `FAIL`, AI 실행 실패는 `AI_FAILED`입니다. 두 판정이 모두 PASS면 종료 코드 0, 실패는 1, 검증 불가는 2입니다. 자유 형식 문장의 정확성은 이 시나리오의 범위 밖입니다. JSON이 사용자에게 제공하는 검증 대상 답변입니다.
 
-## 기존 진단 재현
+## AI 실패 진단
 
-`run.js`는 과거 고정 분석과 진단 기록을 재현하기 위한 진입점입니다. **Harness 루트**에서 실행합니다.
-
-| 명령 | 범위 |
-| --- | --- |
-| `node run.js --build-only --local-source runs/baseline --config config.local.json` | 격리된 기준 빌드·테스트와 stdio 오류 응답 검사. 실제 서비스 요청 없이 원본 진단을 재현 |
-| `node run.js --failure-example` | 통제된 AI 실패와 보고 처리 재현. 의도적으로 실패 코드 반환 |
-| `node run.js --agent-smoke` | Codex 초기화 확인. Codex CLI 인증·네트워크 필요 |
-| `node run.js --legacy-full` | 고정 UTC 문제 수정의 과거 흐름. 로컬 검증 후 검토 단계에서 종료 |
-
-일반 검수의 진입점은 Codex와 `verify.js`입니다. 레거시 진단에서 `--offline-install`을 쓸 경우 완전한 npm 캐시가 사전에 준비되어 있어야 하며, 설치 스크립트가 생략됩니다. 자세한 과거 환경 제약은 [실행 기록](execution.md)을 참고하세요.
+Harness 루트에서 `node run.js --failure-example`로 의도적으로 실패하는 하위 프로세스의 분류와 보고를 재현할 수 있습니다. `node run.js --agent-smoke`는 기존 Codex 초기화 진단이며 CLI 인증과 네트워크가 필요합니다. 두 명령의 증거와 적용 범위는 [실패 처리 근거](execution.md#실패-처리-근거)를 참고하세요. 공식 검수 흐름은 현재 Codex 세션에서 `verify.js`와 `verify-ai.js`를 호출합니다.
