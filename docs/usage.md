@@ -56,7 +56,11 @@ node verify.js --mcp runs/baseline --phase before --feature absolute --fixed-end
 node verify.js --mcp runs/candidate --phase after --feature absolute --fixed-end "$fixed_end"
 ```
 
-종료 값은 과거의 5분 경계 UTC Unix 밀리초입니다. 해당 시각까지의 15분을 검증합니다. 명령 옵션을 생략하면 설정의 `fixedEnd`, 둘 다 없으면 실행 시각보다 최소 20분 앞선 최신 5분 경계를 사용합니다. APM 통계는 v2 집계 대조를 위해 5분 경계를 사용합니다. 서버만 선택하면 `--select server-absolute --fixed-start START_MS --fixed-end END_MS`로 밀리초 경계를 지정할 수 있습니다. 동일 기간의 반복 결과를 확인할 때는 두 경계와 나머지 조건을 그대로 재사용합니다. PromQL 시간 전달처럼 독립 참조가 별도로 필요한 기능은 대상 MCP의 통제된 HTTP Fixture에서 전송한 요청을 확인하고 테스트를 검토 자료에 첨부합니다.
+종료 값은 과거의 5분 경계 UTC Unix 밀리초입니다. 해당 시각까지의 15분을 검증합니다. 명령 옵션을 생략하면 설정의 `fixedEnd`, 둘 다 없으면 실행 시각보다 최소 20분 앞선 최신 5분 경계를 사용합니다. APM 통계는 v2 집계 대조를 위해 5분 경계를 사용합니다. 서버만 선택하면 `--select server-absolute --fixed-start START_MS --fixed-end END_MS`로 밀리초 경계를 지정할 수 있습니다. 동일 기간의 반복 결과를 확인할 때는 두 경계와 나머지 조건을 그대로 재사용합니다. MXQL·PromQL이 실제로 전송한 밀리초 경계, 잘못된 입력의 거부, 동일 기간 반복 조회는 절대시간을 지원하는 후보의 빌드로 다음 통제 테스트를 실행해 확인할 수 있습니다. 테스트는 가상의 HTTP 응답을 사용합니다.
+
+```bash
+WHATAP_ABSOLUTE_MCP=runs/candidate node --test test/absolute-feature.test.js
+```
 
 ### 상대시간 전후 검증
 
