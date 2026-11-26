@@ -10,14 +10,16 @@
 | 보고서 출력의 `pr-body.md` | GitHub PR에 올릴 본문 |
 | 보고서 출력의 `report.md`, `evidence.json` | 각 시도의 결과, 원본 JSON 포인터, 비교 근거와 첨부 로그의 경로·SHA-256 |
 
-배치에는 실제 비교에 사용한 키, 필드, 기간, MCP·HTTP 표본, 누락·중복·집계, 정규화 전후 최대 오차가 기록됩니다. 키 차이로 판정이 끝난 경우 교집합 통계는 별도의 진단입니다. APM 표시 범위 밖의 HTTP 행도 통계에서 확인할 수 있습니다. 상대시간의 전후 값은 각각의 Period에 대한 기준 응답과 비교합니다.
+배치에는 실제 비교에 사용한 키, 필드, 기간, MCP·HTTP 표본, 누락·중복·집계, 정규화 전후 최대 오차가 기록됩니다. 중복 그룹 수, 그룹에 속한 전체 행 수, 첫 행을 제외한 추가 행 수를 구분합니다. 로컬 보고서는 비교 범위에서 그룹별 행 수와 일대일 대응 결과를 기록합니다. 중복 생성 계층이 확인되지 않은 경우 원인 미확인으로 표시합니다. APM 표시 범위 밖의 HTTP 행도 통계에서 확인할 수 있습니다. 상대시간의 전후 값은 각각의 검증된 Period에 대한 기준 응답과 비교합니다. 전후 실제 측정값과 통제된 재현 결과를 구분합니다.
+
+실제 표본 시각과 관찰 간격은 로컬 JSON에 기록합니다. 버킷 간격이 정의된 시나리오에는 그 간격을 초과한 시각 차이를 표시합니다. 정상 빈 응답은 전달 동작만 통과로 기록하고 측정값 비교와 구분합니다.
 
 ## Codex의 보고서 생성
 
 Codex가 입력을 작성하고 사용자는 증거와 최종 반영 근거를 검토합니다. 기록된 보고서를 다시 생성할 때도 다음 계약을 사용합니다.
 
 1. **Harness 루트**에서 [예제 매니페스트](review.example.json)를 로컬 작업 디렉터리에 복사합니다. `kind`는 변경 대상에 따라 `mcp`, `harness`, `audit`로 지정합니다. 기준·후보·Harness의 전체 커밋 SHA를 채웁니다.
-2. `runs`에 실행별 원본 `report.json`을 연결합니다. MCP 변경 보고서에는 깨끗한 원본과 검증을 통과한 깨끗한 후보의 실제 실행을 `before`, `after`로 연결합니다. 보고서 빌더는 지정한 MCP/Harness SHA와 실행 증거, 전후 고정 구간의 일치를 확인합니다. 과거 근거, 실패, 재생은 각각 `history`, `failure`, `replay`로 구분합니다.
+2. `runs`에 실행별 원본 `report.json`을 연결합니다. MCP 변경 보고서에는 깨끗한 원본과 검증을 통과한 깨끗한 후보의 실제 실행을 `before`, `after`로 연결합니다. 보고서 빌더는 지정한 MCP/Harness SHA와 실행 증거, 전후 기본 검증 조건과 선택한 고정 구간의 일치를 확인합니다. 과거 근거, 실패, 재생은 각각 `history`, `failure`, `replay`로 구분합니다.
 3. `attachments`에 `test` 또는 `reproduction` 역할의 로그를 연결합니다. Harness 변경은 동일 입력을 대조한 `comparison` 첨부도 필요합니다. 경로는 매니페스트 파일 기준 상대 경로로 해석됩니다.
 4. `sections`의 14개 항목을 채워 재현, 원인, 영향, 변경, 테스트, 실패 이력, 한계와 근거를 설명합니다. 모든 섹션 문장은 공개 범위를 따릅니다. 공개용 본문 검토 후 `publicReviewed`를 설정합니다.
 5. MCP·Harness 수정은 변경마다 `mergeRationale`을 제공합니다. 유지 시 위험, 서비스 영향, 대안, 선택 이유, 이점, 호환성 및 최종 반영 근거를 기록합니다. 예제의 분류와 대상 항목에는 아래 값을 사용합니다. 변경 없는 `audit`는 생략할 수 있습니다.
@@ -26,6 +28,18 @@ Codex가 입력을 작성하고 사용자는 증거와 최종 반영 근거를 �
 | --- | --- |
 | `classification` | 구현 결함 수정, 기능 개선, 호환성 개선, 보고·운영 개선 |
 | `scope` | MCP 동작 품질, Harness 검증, Harness 보고·운영 |
+
+### 변경 및 실행 근거 구조
+
+성공한 MCP 수정 매니페스트는 Git에서 저장한 통합 패치 파일을 `role: "diff"`로 연결하고, `testDetails` 배열에 실제 테스트 명령·목적·판정·종료 코드·첨부 이름·로그의 근거 문자열을 입력합니다. 예를 들어 테스트 로그 첨부의 `label`이 `MCP unit`이면 테스트에 `evidence: "MCP unit"`과 로그에 있는 성공 요약을 `proof`로 지정합니다. 빌더는 첨부 내용에서 문자열의 존재, 종료 코드 조건, Git diff 형식을 확인합니다. 과거 실패 로그에서 종료 코드를 별도로 수집하지 않았다면 `exitCode: null`과 사유를 기록합니다. 선언한 명령이 실제로 실행됐는지와 분석·수정 이유의 사실성까지 자동으로 보증하지는 않습니다.
+
+```json
+{"command":"npm test","purpose":"CPU 값 전달 회귀","status":"PASS","exitCode":0,"evidence":"MCP unit","proof":"Tests  148 passed"}
+```
+
+공개 승인 검토를 마친 소스 코드만 `codePublicReviewed: true`로 지정합니다. 변경된 파일 이름은 Git diff로 생성하고 배포 번들의 패치 본문은 로컬 첨부에 보관합니다. `outcome`은 변경 성공이면 `VERIFIED`(기본값)입니다. 실패 보고는 실제 근거와 함께 `VALIDATION_FAILED`, `UNVERIFIABLE`, `AI_FAILED`를 명시합니다. 테스트를 수행하지 않은 경우에는 `status: "NOT_RUN"`과 사유를 기록합니다. 변경 없는 감사에는 Git diff나 성공 테스트를 요구하지 않습니다.
+
+기본 전후 표 외에 `history`, `failure`, `replay`의 시나리오와 AI 답변 판정 및 검사항목을 원본 JSON에서 자동으로 표시합니다. 공개 본문의 AI 표는 판정과 검사 결과만 사용합니다.
 
 다음은 **Harness 루트**에서 실행하는 예입니다. `runs/task/review.json`은 작성 완료된 매니페스트이며, 출력 폴더는 아직 없어야 합니다.
 
@@ -60,7 +74,7 @@ test -f publication.local.json || install -m 600 publication.example.json public
 | `includeDifferences` | 표본의 원값·정규화 후 차이를 공개. 기본값 `false` |
 | `includeStatistics` | 비교 필드 전체가 승인된 시나리오의 행 수 등의 자동 통계를 공개. 기본값 `false` |
 
-CPU, 메모리, TPS, 오류·예외와 호출 수, 응답시간 및 집계 중 빌더가 지원하는 필드만 설정할 수 있습니다. 같은 프로젝트·지표의 승인 범위는 이후 실행에도 적용됩니다. 별도 설정을 쓰려면 `node review.js build MANIFEST OUTPUT --publication-policy FILE`을 사용합니다. 과거 `publishSamples`, `publishCounts`는 공개를 허가하지 않습니다.
+CPU, 메모리, TPS, 오류·예외와 호출 수, 응답시간 및 집계 중 빌더가 지원하는 필드만 설정할 수 있습니다. 같은 프로젝트·지표의 승인 범위는 이후 실행에도 적용됩니다. 별도 설정을 쓰려면 `node review.js build MANIFEST OUTPUT --publication-policy FILE`을 사용합니다. 별도 체크아웃에는 정책 파일이 자동 복사되지 않습니다. 해당 PR의 승인 범위를 확인할 수 없으면 매니페스트에 `publicationAuthorization: "unconfirmed"`를 기록합니다. 공개 본문은 승인 정책 적용·기본 비공개·승인 미확인을 구분합니다. 명시한 파일에 접근할 수 없거나 내용이 유효하지 않으면 생성을 중단합니다. 과거 `publishSamples`, `publishCounts`는 공개를 허가하지 않습니다.
 
 공개 표는 조회 시작 기준 상대 위치와 일관된 가명을 사용합니다. 실패 사례에는 보호 대상 문자열이 없는 오류 안내와 공개 가능한 독립 HTTP 대조 표본을 사용합니다. 승인되지 않은 수치, 인증정보, 원본 UTC 시각, IP, 호스트명, 프로젝트·트랜잭션 식별자와 전체 응답은 공개하지 않습니다. 설정 및 실행 디렉터리는 Git에서 제외합니다.
 
@@ -80,10 +94,10 @@ gh pr create --repo "$MCP_FORK" --base "$BASE_BRANCH" --head "$HEAD_BRANCH" \
   --title "변경 요약" --body-file runs/task/published-review/pr-body.md
 ```
 
-`PR_NUMBER`에 갱신할 PR 번호를 먼저 지정한 뒤, 기존 PR의 본문 갱신에는 `gh pr edit "$PR_NUMBER" --repo "$MCP_FORK" --body-file runs/task/published-review/pr-body.md`를 사용할 수 있습니다. 제목, 코드 차이, 검증 실패와 한계, 공개된 비교 표본을 확인한 뒤 사용자가 GitHub에서 최종 Merge합니다. 객관적 근거가 없으면 그 이유를 보고합니다.
+`PR_NUMBER`에 갱신할 PR 번호를 먼저 지정한 뒤, 기존 PR의 본문 갱신에는 `gh pr edit "$PR_NUMBER" --repo "$MCP_FORK" --body-file runs/task/published-review/pr-body.md`를 사용할 수 있습니다. 제목, 코드 차이, 검증 실패와 한계, 공개된 비교 표본을 확인한 뒤 사용자가 GitHub에서 최종 Merge합니다. 객관적 결함 근거가 없으면 수정이 필요 없는 이유, 기능 미지원 근거와 검증 한계를 보고합니다.
 
 ## 기존 근거로 재생성
 
 - **보고서 서식만 재생성.** 기존 원본과 테스트 로그를 가리키는 매니페스트를 `review.js build`에 전달합니다. 새 출력 경로를 사용하면 기존 실행 파일을 보존합니다.
-- **판정 재생.** `node verify.js --replay runs/실행ID/report.json`은 저장된 MCP 요청·응답과 독립 HTTP 구간이 맞는지 확인하고 이전·현재 판정을 새 실행에 함께 남깁니다. 과거 오류 플래그를 추정한 경우 표시됩니다. 재생에는 서비스 접근이 필요하지 않습니다.
+- **판정 재생.** `node verify.js --replay runs/실행ID/report.json`은 저장된 MCP 요청·응답과 독립 HTTP 구간이 맞는지 확인하고 이전·현재 판정을 새 실행에 함께 남깁니다. 과거 오류 플래그를 추정한 경우 표시됩니다. 상대 요청에 호출 시각이 저장되지 않았다면 시간 근거가 부족해 `UNVERIFIABLE`이 될 수 있습니다. 재생에는 서비스 접근이 필요하지 않습니다.
 - **실데이터 재검증.** 새로운 검증을 주장하려면 [직접 검증](usage.md#직접-검증)을 실행합니다. 저장 입력 재생은 최신 실제 서비스 검증 근거와 구분합니다.

@@ -44,14 +44,28 @@ test('a rejected query reports the HTTP control and never invents candidate rows
 
 test('review gates sections, disclosure and live evidence and keeps actual rows local', () => {
   const manifest = { kind: 'mcp', mergeRationale: rationale, baselineCommit: before, candidateCommit: after, harnessCommit: harness,
-    publicReviewed: true, sections: Object.fromEntries(Object.keys(sections).map(k => [k, '검토 문장'])) };
+    publicReviewed: true, testDetails: [{ command: 'npm test', purpose: 'Checks CPU transport', status: 'PASS', exitCode: 0, evidence: 'test', proof: 'tests passed' }],
+    sections: Object.fromEntries(Object.keys(sections).map(k => [k, `${k} 검토 문장`])) };
   const makeRun = (role, commit) => ({ role, run: { id: role, mode: 'live', status: 'VERIFIED', harness,
     finishedAt: '2025-01-01', target: { commit, dirty: false }, events: [], conditions: { cases: [scenario] },
     probes: [probe([row('private-id', '13.37')], [row('private-id', 13.37)])] } });
   const runs = [makeRun('before', before), makeRun('after', after)];
-  const attachments = [{ label: 'test', path: 'local-run.log', sha256: 'd'.repeat(64) }];
+  const attachments = [
+    { role: 'test', label: 'test', path: 'local-run.log', sha256: 'd'.repeat(64), content: 'tests passed' },
+    { role: 'diff', content: 'diff --git a/src/test.ts b/src/test.ts\n@@ -1 +1 @@\n-privateCode\n+fixedCode\n' },
+  ];
+  assert.throws(() => buildReview({ ...manifest, testDetails: [] }, runs, attachments), /REVIEW_TEST_DETAILS_REQUIRED/);
+  assert.throws(() => buildReview(manifest, runs, attachments.slice(0, 1)), /REVIEW_GIT_DIFF_REQUIRED/);
   const report = buildReview(manifest, runs, attachments);
   assert.match(report.local, /private-id/);
+  assert.match(report.local, /privateCode/);
+  assert.doesNotMatch(report.body, /privateCode/);
+  const history = { role: 'history', run: { ...runs[1].run, id: 'cpu-history',
+    aiAnswer: { status: 'PASS', reason: 'AI_CPU_ANSWER_MATCH', checks: [{ field: 'averageCpu', ok: true }],
+      submission: { text: 'private-answer' } } } };
+  const detailed = buildReview(manifest, [...runs, history], attachments);
+  assert.match(detailed.body, /cpu-history.*AI&#95;CPU&#95;ANSWER&#95;MATCH/);
+  assert.doesNotMatch(detailed.body, /private-answer/);
   assert.throws(() => buildReview({ ...manifest, mergeRationale: [] }, runs, attachments), /MERGE_RATIONALE_REQUIRED/);
   assert.throws(() => buildReview({ ...manifest,
     mergeRationale: [{ ...rationale[0], compatibility: '' }] }, runs, attachments), /MERGE_RATIONALE_FIELD_REQUIRED compatibility/);
@@ -59,6 +73,11 @@ test('review gates sections, disclosure and live evidence and keeps actual rows 
   assert.throws(() => buildReview({ ...manifest, publicReviewed: false }, runs, attachments), /DISCLOSURE/);
   assert.throws(() => buildReview({ ...manifest, sections: {} }, runs, attachments), /SECTION_MISSING/);
   assert.throws(() => buildReview(manifest, runs.slice(0, 1), attachments), /EVIDENCE_REQUIRED after/);
+  const modern = structuredClone(runs);
+  for (const { run } of modern) run.conditions.suite = 'default';
+  assert.doesNotThrow(() => buildReview(manifest, modern, attachments));
+  modern[1].run.conditions.cases = [{ ...scenario, projectCode: scenario.projectCode + 1 }];
+  assert.throws(() => buildReview(manifest, modern, attachments), /DEFAULT_REVIEW_CONDITIONS_MISMATCH/);
   assert.throws(() => buildReview(manifest, [runs[0], { ...runs[1], run: { ...runs[1].run, mode: 'replay' } }], attachments),
     /EVIDENCE_REQUIRED after/);
 });
@@ -186,4 +205,19 @@ test('merge rationale renders open prose with lists and a separate final basis',
   assert.match(section, /\*\*대응 가능성과 대안\*\*\n\n대안 설명\n\n- 첫째\n- 둘째/);
   assert.match(section, /\*\*최종 반영 근거\*\*\n\n최종 판단/);
   assert.doesNotMatch(section, /<details>|^\|/m);
+});
+
+test('failure reports keep observed statuses without a success-only candidate or patch', () => {
+  const create = outcome => ({
+    kind: 'mcp', outcome, baselineCommit: before, candidateCommit: after, harnessCommit: harness,
+    publicReviewed: true, mergeRationale: rationale,
+    sections: Object.fromEntries(Object.keys(sections).map(k => [k, '근거 검토 문장'])),
+  });
+  for (const status of ['VALIDATION_FAILED', 'UNVERIFIABLE', 'AI_FAILED']) {
+    const input = [{ role: 'failure', run: { id: 'failed-run', status, finishedAt: '2025-01-02',
+      probes: [], events: [] } }];
+    const report = buildReview(create(status), input, [{ role: 'test' }]);
+    assert.match(report.body, new RegExp(status.replaceAll('_', '&#95;')));
+    assert.equal(report.evidence.runs[0].run.status, status);
+  }
 });

@@ -228,7 +228,7 @@ test -f config.local.json || install -m 600 config.example.json config.local.jso
 | `apiOrigin` | 선택. 승인된 HTTPS API Origin. 생략 시 `https://api.whatap.io` |
 | `fixedEnd` | 선택. 과거 5분 경계 UTC Unix 밀리초. 검증 구간 종료점 |
 
-`MCP_FORK`, `BASE_BRANCH` 등은 가이드의 셸 변수입니다. `config.local.json`에는 변수명 대신 실제 값을 써야 합니다. JSON은 체크아웃에 남으며, 셸 변수는 새 셸에서 후속 명령에 필요할 때 다시 지정합니다. 레거시 `run.js --legacy-full`에는 `OWNER/whatap-open-mcp` 형식의 Fork 이름 제약이 있습니다.
+`MCP_FORK`, `BASE_BRANCH` 등은 가이드의 셸 변수입니다. `config.local.json`에는 변수명 대신 실제 값을 써야 합니다. JSON은 체크아웃에 남으며, 셸 변수는 새 셸에서 후속 명령에 필요할 때 다시 지정합니다. 빌드 진단용 `run.js --build-only`에는 `OWNER/whatap-open-mcp` 형식의 Fork 이름 제약이 있습니다.
 
 WhaTap 환경 관리자가 승인한 MCP 및 독립 HTTP 읽기 전용 토큰을 검증을 실행할 **같은 Bash**에 주입합니다. 비밀 저장소에서 주입하거나, 셸 추적이 꺼진 터미널에서 아래처럼 화면에 표시하지 않고 입력합니다. 새 셸에서는 다시 주입합니다.
 

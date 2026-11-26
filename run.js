@@ -1,14 +1,12 @@
-import { lstat, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { tmpdir } from 'node:os';
 import { command } from './lib/process.js';
-import { ReferenceApi } from './lib/http.js';
 import { StdioMcpClient } from './lib/mcp.js';
-import { argumentsFor, invalidApmRange, probe, query } from './lib/probe.js';
-import { baseline, scenarios } from './lib/scenarios.js';
-import { candidateScopeValid, existingTestDiff } from './lib/scope.js';
+import { invalidApmRange } from './lib/probe.js';
+import { baseline, validationScenarios } from './lib/scenarios.js';
 import { saveReport } from './lib/report.js';
 
 process.umask(0o077);
@@ -43,10 +41,9 @@ const codexArgs = ['-a', 'never', 'exec', '--ignore-user-config', '--ephemeral',
 const gitCredentials = ['-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential'];
 const secrets = ['WHATAP_API_TOKEN', 'WHATAP_HTTP_API_TOKEN', 'OPENAI_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN']
   .map(key => process.env[key]).filter(Boolean);
-let api;
 const redact = text => {
   for (const token of secrets) text = text.replaceAll(token, '[REDACTED]');
-  return api?.redact(text) ?? text;
+  return text;
 };
 
 function event(stage, status, detail) {
@@ -72,52 +69,6 @@ async function step(label, executable, args, options = {}) {
   return result.stdout;
 }
 
-async function candidatePaths(worktree, attempt, allowDist = false) {
-  const changed = (await step('diff-paths', 'git', ['diff', '--no-renames', '--name-only', '-z', 'HEAD'], { cwd: worktree })).split('\0');
-  const added = (await step('new-paths', 'git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: worktree })).split('\0');
-  const paths = [...new Set([...changed, ...added].filter(Boolean))].sort();
-  const existingTestChanges = (await step('existing-test-changes', 'git', existingTestDiff,
-    { cwd: worktree })).split('\0').filter(Boolean);
-  if (!candidateScopeValid(paths, existingTestChanges, allowDist)) {
-    throw new RunFailure('VALIDATION_FAILED', 'CANDIDATE_SCOPE_INVALID');
-  }
-  for (const path of paths) {
-    const info = await lstat(join(worktree, path)).catch(() => null);
-    if (!info?.isFile() || info.isSymbolicLink()) throw new RunFailure('VALIDATION_FAILED', 'CANDIDATE_FILE_TYPE');
-    if (!path.startsWith('dist/')) {
-      const content = await readFile(join(worktree, path), 'utf8');
-      if (redact(content) !== content || /gh[pousr]_[a-zA-Z0-9]{25,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9_-]{20,}/.test(content)) {
-        throw new RunFailure('VALIDATION_FAILED', 'CREDENTIAL_IN_CANDIDATE');
-      }
-    }
-  }
-  await step('diff-include-additions', 'git', ['add', '--intent-to-add', '--', ...paths], { cwd: worktree });
-  const patch = await step('candidate-diff', 'git', ['diff', '--no-ext-diff', '--binary', 'HEAD'], {
-    cwd: worktree, privateOutput: true,
-  });
-  await writeFile(join(directory, `candidate-${attempt}${allowDist ? '-verified' : ''}.patch`), redact(patch));
-  return paths;
-}
-
-async function batch(worktree, configuration, cases, phase, negative = false) {
-  const env = { ...toolsEnv, WHATAP_API_TOKEN: process.env.WHATAP_API_TOKEN,
-    WHATAP_API_URL: configuration.apiOrigin ?? 'https://api.whatap.io' };
-  const client = new StdioMcpClient(join(worktree, 'dist/index.js'), 45_000, env);
-  try {
-    await client.start();
-    const result = [];
-    for (const scenario of cases) result.push(await probe(client, api, scenario));
-    if (negative) result.push(await invalidApmRange(client, cases.find(s => s.statisticsMode)));
-    for (const item of result) {
-      run.probes.push({ ...item, phase });
-      event(phase + '/' + item.id, item.status, item.reason);
-    }
-    return result;
-  } finally {
-    await client.close();
-  }
-}
-
 async function main() {
   run.harness = (await step('harness-head', 'git', ['rev-parse', 'HEAD'], { cwd: root })).trim();
   if (values['failure-example']) {
@@ -134,8 +85,8 @@ async function main() {
     run.status = 'AGENT_SMOKE_ONLY';
     return;
   }
-  if (!values['build-only'] && !values['legacy-full']) {
-    throw new RunFailure('UNVERIFIABLE', 'USE_VERIFY_JS_OR_SELECT_LEGACY_MODE');
+  if (!values['build-only'] || values['legacy-full']) {
+    throw new RunFailure('UNVERIFIABLE', 'USE_VERIFY_JS_FOR_EVIDENCE_LED_REVIEW');
   }
   const config = JSON.parse(await readFile(resolve(values.config), 'utf8'));
   if (!/^[\w-]+\/whatap-open-mcp$/.test(config.fork ?? '') || /^whatap\//i.test(config.fork) ||
@@ -149,41 +100,10 @@ async function main() {
     throw new RunFailure('UNVERIFIABLE', 'CONFIG_PROJECT_OR_WINDOW');
   }
 
-  const cases = scenarios(config);
-  const target = cases.find(s => s.repairTarget);
+  const cases = validationScenarios(config);
   run.conditions = { fork: config.fork, baseBranch: config.baseBranch, cases };
   const url = `https://github.com/${config.fork}.git`;
   const worktree = join(directory, 'mcp');
-  let actor;
-  if (!values['build-only']) {
-    if ((await step('harness-clean', 'git', ['status', '--porcelain'], { cwd: root })).trim()) {
-      throw new RunFailure('UNVERIFIABLE', 'HARNESS_WORKTREE_DIRTY');
-    }
-    if (!process.env.WHATAP_API_TOKEN || !process.env.WHATAP_HTTP_API_TOKEN) {
-      throw new RunFailure('UNVERIFIABLE', 'WHATAP_DEMO_TOKENS_MISSING');
-    }
-    api = new ReferenceApi(process.env.WHATAP_HTTP_API_TOKEN, config.apiOrigin);
-    await api.connect([...new Set(cases.map(s => s.projectCode))]);
-    event('whatap-read-only-access', 'PASS');
-    actor = JSON.parse(await step('github-user', 'gh', ['api', 'user', '--jq', '{login,id}'],
-      { env: ghEnv, privateOutput: true }));
-    if (!/^[\w-]+$/.test(actor.login ?? '') || !Number.isSafeInteger(actor.id)) {
-      throw new RunFailure('UNVERIFIABLE', 'GITHUB_ACTOR_UNAVAILABLE');
-    }
-    const remote = JSON.parse(await step('fork-preflight', 'gh', ['api', 'repos/' + config.fork],
-      { env: ghEnv, privateOutput: true }));
-    if (!remote.fork || remote.parent?.full_name.toLowerCase() !== 'whatap/whatap-open-mcp' ||
-        !remote.permissions?.push) {
-      throw new RunFailure('UNVERIFIABLE', 'FORK_WRITE_OR_PARENT_UNVERIFIED');
-    }
-    const base = (await step('fork-base', 'gh', ['api', 'repos/' + config.fork + '/git/ref/heads/' + config.baseBranch,
-      '--jq', '.object.sha'], { env: ghEnv })).trim();
-    if (base !== baseline) throw new RunFailure('UNVERIFIABLE', 'FORK_BASE_NOT_PINNED');
-    await step('agent-auth', 'codex', ['login', 'status'], {
-      env: { ...toolsEnv, ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}) },
-      failureStatus: 'AI_FAILED', privateOutput: true,
-    });
-  }
   const source = values['local-source'] ? resolve(values['local-source']) : url;
   await step('mcp-clone', 'git', [...gitCredentials, 'clone', '--no-local', '--no-checkout', '--', source, worktree],
     { env: ghEnv, timeout: 180_000 });
@@ -193,87 +113,18 @@ async function main() {
     ...(values['offline-install'] ? ['--offline', '--ignore-scripts'] : [])], { cwd: worktree, env: npmEnv, timeout: 180_000 });
   await step('mcp-baseline-build', 'npm', ['run', 'build'], { cwd: worktree, env: npmEnv, timeout: 120_000 });
   await step('mcp-baseline-tests', 'npm', ['test'], { cwd: worktree, env: npmEnv, timeout: 120_000 });
-  if (values['build-only']) {
-    const client = new StdioMcpClient(join(worktree, 'dist/index.js'), 5_000, {
-      ...toolsEnv, WHATAP_API_TOKEN: 'local-parser-only', WHATAP_API_URL: 'http://127.0.0.1:9',
-    });
-    try {
-      await client.start();
-      const result = await client.callTool(query, argumentsFor(target));
-      const rejected = result.isError === true &&
-        result.content?.some(part => /invalid time range format/i.test(part.text ?? ''));
-      event('mcp-stdio-baseline-range', rejected ? 'PASS' : 'ERROR');
-      if (!rejected) throw new RunFailure('UNVERIFIABLE', 'BASELINE_RANGE_SMOKE_UNEXPECTED');
-    } finally {
-      await client.close();
-    }
-    run.status = 'BUILD_ONLY';
-    return;
+  const client = new StdioMcpClient(join(worktree, 'dist/index.js'), 5_000, {
+    ...toolsEnv, WHATAP_API_TOKEN: 'local-parser-only', WHATAP_API_URL: 'http://127.0.0.1:9',
+  });
+  try {
+    await client.start();
+    const result = await invalidApmRange(client, cases.find(s => s.negative));
+    event('mcp-stdio-baseline-invalid-input', result.status);
+    if (result.status !== 'PASS') throw new RunFailure('UNVERIFIABLE', 'BASELINE_RANGE_SMOKE_UNEXPECTED');
+  } finally {
+    await client.close();
   }
-
-  const baselineCases = cases.map(s => s.statisticsMode ? { ...s, fixed: undefined, timeRange: '15m' } : s);
-  const before = await batch(worktree, config, baselineCases, 'before', true);
-  const failure = before.find(r => r.id === target.id);
-  if (failure?.status !== 'FAIL' || failure.reason !== 'ABSOLUTE_RANGE_REJECTED') {
-    throw new RunFailure('UNVERIFIABLE', 'REPAIR_TARGET_NOT_REPRODUCED');
-  }
-
-  await step('restore-baseline-dist', 'git', ['restore', '--source=HEAD', '--', 'dist'], { cwd: worktree });
-  const prompt = [
-    'Analyze and repair the observed functional defect in this WhaTap MCP checkout.',
-    'The independent direct HTTP MXQL reference returned nonempty rows for a fixed historical UTC interval.',
-    'The MCP whatap_query_data call rejected the same interval with Invalid time range format.',
-    'Its timeRange argument now needs to support an explicit ISO 8601 UTC start/end interval,',
-    'formatted as 2025-01-01T00:00:00.000Z/2025-01-01T00:15:00.000Z.',
-    'Preserve all relative queries, strict input validation, error and limit reporting.',
-    'The harness parses only the displayed Period and calls its own reference API.',
-    'Do not change validation criteria, contact services, or commit. Edit src/*.ts (including subdirs)',
-    'and optionally add tests/*.ts. Keep existing tests intact. Leave dist to the harness.',
-    'Report your actual diagnosis, rationale, files and limits in Korean without credentials or service data.',
-  ].join('\n');
-
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const note = await step('agent-' + attempt, 'codex', [...codexArgs, '-s', 'workspace-write', '-C', worktree,
-        '-c', 'sandbox_workspace_write.network_access=false', '-'], {
-        cwd: worktree, input: prompt + (attempt > 1 ? '\nRetry after: ' + run.lastFailure : ''),
-        env: agentEnv, timeout: 480_000, failureStatus: 'AI_FAILED',
-      });
-      run.agentNotes.push(note.trim());
-      await candidatePaths(worktree, attempt);
-      await step('mcp-candidate-build-' + attempt, 'npm', ['run', 'build'], {
-        cwd: worktree, env: npmEnv, timeout: 120_000, failureStatus: 'VALIDATION_FAILED',
-      });
-      await step('mcp-regression-tests-' + attempt, 'npm', ['test'], {
-        cwd: worktree, env: npmEnv, timeout: 120_000, failureStatus: 'VALIDATION_FAILED',
-      });
-      const after = await batch(worktree, config, cases, 'after-' + attempt, true);
-      const problems = after.filter(result => result.status !== 'PASS');
-      if (problems.length) {
-        throw new RunFailure(problems.some(p => p.status === 'FAIL') ? 'VALIDATION_FAILED' : 'UNVERIFIABLE',
-          problems.map(p => `${p.id}/${p.reason}`).join(','));
-      }
-      const relativeApm = await batch(worktree, config, baselineCases.filter(s => s.statisticsMode),
-        'after-relative-apm-' + attempt);
-      if (relativeApm.some(result => result.status !== 'PASS')) {
-        throw new RunFailure(relativeApm.some(p => p.status === 'FAIL') ? 'VALIDATION_FAILED' : 'UNVERIFIABLE',
-          relativeApm.filter(p => p.status !== 'PASS').map(p => `${p.id}/${p.reason}`).join(','));
-      }
-      run.files = await candidatePaths(worktree, attempt, true);
-      break;
-    } catch (error) {
-      run.lastFailure = String(error.message);
-      event('attempt-' + attempt, error.status ?? 'UNVERIFIABLE', run.lastFailure);
-      if (attempt === 2 || error.status === 'UNVERIFIABLE' || !error.status) throw error;
-      // A retry starts with clean tracked state and removes only files inside this disposable clone.
-      await step('retry-reset', 'git', ['restore', '--source=HEAD', '--staged', '--worktree', '--', '.'], { cwd: worktree });
-      await step('retry-clean', 'git', ['clean', '-fd'], { cwd: worktree });
-      run.files = undefined;
-    }
-  }
-  run.status = 'VERIFIED';
-
-  event('submission', 'REVIEW_REQUIRED', 'Use review.js with the verified local candidate before submitting.');
+  run.status = 'BUILD_ONLY';
 
 }
 

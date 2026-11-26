@@ -56,8 +56,7 @@ test('missing fields and malformed types or JSON fail the format check', async (
 });
 
 test('incomplete reference does not establish either result', async () => {
-  for (const http of [undefined, { ...reference, body: rows.slice(1) },
-    { ...reference, body: [...rows.slice(1), rows[1]] }]) {
+  for (const http of [undefined, { ...reference, body: { data: rows.slice(1), total: 12, retrievedTotal: 11 } }]) {
     const { mcp, ai } = await verifyCpuAnswer(scenario, capture(), { text: JSON.stringify(answer) }, http);
     assert.equal(mcp.status, 'UNVERIFIABLE');
     assert.equal(ai.status, 'UNVERIFIABLE');
@@ -87,4 +86,103 @@ test('AI execution failure is distinct from wrong data', async () => {
   assert.equal(mcp.status, 'PASS');
   assert.equal(ai.status, 'AI_FAILED');
   assert.equal(ai.responsibility, 'AI_EXECUTION');
+});
+
+test('relative CPU uses the captured Period and unaligned 5-second grid', async () => {
+  const relative = cpuScenario(1, '-123');
+  const input = capture();
+  input.call = mcpCall(relative);
+  assert.equal(input.call.args.timeRange, '1m');
+  const relativeEnd = etime - 375;
+  const relativeStart = stime - 375;
+  input.result.content[0].text = input.result.content[0].text
+    .replace(iso(stime), iso(relativeStart)).replace(iso(etime), iso(relativeEnd));
+  input.callTiming = { startedAt: relativeEnd, finishedAt: etime + 200 };
+  const submission = { text: JSON.stringify({ ...answer, startUtc: iso(relativeStart), endUtc: iso(relativeEnd) }) };
+  const { mcp, ai } = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(mcp.status, 'PASS');
+  assert.equal(ai.status, 'PASS');
+  input.callTiming.startedAt += 1;
+  const stale = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(stale.mcp.reason, 'MCP_PERIOD_OUTSIDE_CALL');
+  assert.equal(stale.ai.status, 'UNVERIFIABLE');
+});
+
+test('only a matching interior with exchanged edge rows establishes a precision limit', async () => {
+  const relative = cpuScenario(1, '-123');
+  const input = capture([...rows.slice(1), { ...rows[0], time: etime }]);
+  input.call = mcpCall(relative);
+  input.callTiming = { startedAt: etime + 79, finishedAt: etime + 205 };
+  input.result.content[0].text = input.result.content[0].text
+    .replace(iso(stime), iso(stime).replace('T', ' ').replace('.000Z', ' UTC'))
+    .replace(iso(etime), iso(etime).replace('T', ' ').replace('.000Z', ' UTC'));
+  const submission = { text: JSON.stringify(answer) };
+  const limited = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(limited.mcp.reason, 'MCP_PERIOD_PRECISION_LIMIT');
+  assert.equal(limited.ai.status, 'UNVERIFIABLE');
+
+  input.result.content[0].text = input.result.content[0].text.replace('12.23', '99.00');
+  const defective = await verifyCpuAnswer(relative, input, submission, reference);
+  assert.equal(defective.mcp.reason, 'FIELD_MISMATCH');
+  assert.equal(defective.mcp.status, 'FAIL');
+});
+
+test('CPU answer processing retains a verified MCP key defect without an HTTP reference', async () => {
+  const input = capture([...rows.slice(0, -1), { ...rows[0], _id_: '' }]);
+  const { mcp, ai } = await check(answer, input, { ok: true, status: 200, body: [] });
+  assert.equal(mcp.status, 'FAIL');
+  assert.equal(mcp.reason, 'MCP_RECORD_IDENTITIES_INVALID');
+  assert.equal(ai.status, 'UNVERIFIABLE');
+});
+
+test('a complete CPU cadence can have a constant nonzero UTC phase', async () => {
+  const shifted = rows.map(row => ({ ...row, time: row.time + 1000 }));
+  const { mcp, ai } = await check(answer, capture(shifted), { ...reference, body: shifted });
+  assert.equal(mcp.status, 'PASS');
+  assert.equal(ai.status, 'PASS');
+  const irregular = shifted.map((row, i) => i === 3 ? { ...row, time: row.time + 1 } : row);
+  assert.equal((await check(answer, capture(irregular), { ...reference, body: irregular })).ai.status, 'PASS');
+});
+
+test('another server exchange does not invalidate an identical selected CPU window', async () => {
+  const relative = cpuScenario(1, '-123');
+  const selected = rows.map(row => ({ ...row, time: row.time + 1000 }));
+  const other = { ...rows[0], _id_: -987 };
+  const input = capture([...selected, { ...other, time: etime }]);
+  input.call = mcpCall(relative);
+  input.callTiming = { startedAt: etime + 79, finishedAt: etime + 205 };
+  input.result.content[0].text = input.result.content[0].text
+    .replace(iso(stime), iso(stime).replace('T', ' ').replace('.000Z', ' UTC'))
+    .replace(iso(etime), iso(etime).replace('T', ' ').replace('.000Z', ' UTC'));
+  const submission = { text: JSON.stringify(answer) };
+  const http = { ...reference, body: [...selected, other] };
+  const result = await verifyCpuAnswer(relative, input, submission, http);
+  assert.equal(result.mcp.reason, 'MCP_PERIOD_PRECISION_LIMIT');
+  assert.equal(result.ai.status, 'PASS');
+  const wrong = { text: JSON.stringify({ ...answer, averageCpu: 99 }) };
+  assert.equal((await verifyCpuAnswer(relative, input, wrong, http)).ai.status, 'FAIL');
+});
+
+test('CPU cadence retains all records in the requested row-weighted mean', async () => {
+  const repeated = [...rows, { ...rows[0], cpu: 94 }];
+  const exact = repeated.reduce((sum, row) => sum + Number(row.cpu.toFixed(2)), 0) / repeated.length;
+  const expected = { ...answer, sampleCount: 13, averageCpu: Number(exact.toFixed(2)), maxCpu: 94 };
+  const result = await check(expected, capture(repeated), { ...reference, body: repeated });
+  assert.equal(result.mcp.status, 'PASS');
+  assert.equal(result.ai.status, 'PASS');
+  assert.equal((await check(answer, capture(repeated), { ...reference, body: repeated })).ai.status, 'FAIL');
+});
+
+test('an independently confirmed empty CPU query has no arithmetic result', async () => {
+  const args = mcpCall(scenario).args;
+  const text = [
+    '**No rows returned.**', `- Project: 1 | timeRange: "${args.timeRange}"`,
+    `- Window (epoch ms): ${stime} → ${etime}`, '- limit: 1000', '- param: (none)',
+    '- Rows: 0 returned, 0 after metadata filtering',
+    'Sent `mql`: `/v2/sys/server_base` — a path reference.',
+  ].join('\n');
+  const capture = { call: mcpCall(scenario), result: { content: [{ type: 'text', text }] } };
+  const { mcp, ai } = await verifyCpuAnswer(scenario, capture, { failed: true }, { ...reference, body: [] });
+  assert.equal(mcp.reason, 'EMPTY_RESPONSE_MATCH');
+  assert.equal(ai.reason, 'CPU_NO_SAMPLES');
 });
